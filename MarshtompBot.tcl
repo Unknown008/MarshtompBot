@@ -17,22 +17,22 @@ package require sqlite3
 package require logger
 
 set scriptDir [file dirname [info script]]
-# Add parent directory to auto_path so that Tcl can find the discord package.
 lappend ::auto_path "${scriptDir}/discord/"
-#source "../tls1.6.7/http-2.8.11.tm"
 package require discord
 
+# to remove later
 source "${scriptDir}/sandbox_procs.tcl"
 # Set ownerId and token variables
 source "${scriptDir}/private.tcl"
 
+# Link to manage discord bots
 # https://discordapp.com/developers/applications/me
-# Prod
+# Live bot invite (defaulted to server/guild admin rights)
 # https://discordapp.com/oauth2/authorize?&client_id=204180397649559552&permissions=8&scope=bot
-# Dev
+# Test bot invite (defaulted to server/guild admin rights)
 # https://discordapp.com/oauth2/authorize?&client_id=204180300673187840&permissions=8&scope=bot
 
-###### Custom stuff here ######
+###### Custom scripts here ######
 
 source [file join $scriptDir custom.tcl]
 source [file join $scriptDir meta.tcl]
@@ -41,6 +41,8 @@ source [file join $scriptDir stats.tcl]
 source [file join $scriptDir pogo.tcl]
 
 ###### End custom stuff ######
+
+## Things beyond this point are mainly what was in the original script. I changed only a few things.
 
 set log [logger::init tclqBot]
 ${log}::setlevel debug
