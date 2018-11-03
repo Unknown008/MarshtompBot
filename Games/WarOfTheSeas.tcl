@@ -9,8 +9,8 @@ namespace eval wots {
   set game(help)         ""
   set game(listeners)    [list]
   set game(deck)         [list]
-  set game)specChan)     "waroftheseas-spectator"
-  set game(parent)       "games"
+  set game(defaultChan)  "waroftheseas-spectator"
+  set game(defaultCat)   "games"
   
   wotsdb eval {
     CREATE TABLE IF NOT EXISTS config(
@@ -132,10 +132,10 @@ proc wots::create_game {userId guildId} {
   }] categoryname channelname
   
   if {$categoryname eq ""} {
-    set categoryname "Games"
+    set categoryname $game(defaultCat)
   }
   if {$channelname eq ""} {
-    set channelname "waroftheseas-spectator"
+    set channelname $game(defaultChan)
   }
   
   foreach channel $channels {
