@@ -99,11 +99,13 @@ proc wots::command {} {
     }
     default {
       if {[llength $game(listeners)] > 0} {
-        for {set i 0} {$i < [llength $game(listeners)]} {incr i} {
-          set cmd [lindex $game(listeners) $i]
+        set cListeners $game(listeners)
+        for {set i 0} {$i < [llength $cListeners]} {incr i} {
+          set cmd [lindex $cListeners $i]
           if {$userId == [dict get $cmd id] &&
               [string toupper $text] in [dict get $cmd word]} {
             set game(listeners) [lreplace $game(listeners) $i $i]
+            set cListeners [lreplace $cListeners $i $i]
             {*}[dict get $cmd cmd] $text
             incr i -1
             incr ::listener -1
@@ -192,7 +194,8 @@ proc wots::create_game {userId guildId} {
     }
   }
   
-  set afterId [after $game(jointimeout) [list coroutine ::wots::check_game[::id] ::wots::check_game $guildId $channelId $userId]]
+  set afterId [after $game(jointimeout) [list coroutine \
+    ::wots::check_game[::id] ::wots::check_game $guildId $channelId $userId]]
   # Game modes
   #  1 - Awaiting players
   #  2 - Setting up channels
@@ -208,7 +211,7 @@ proc wots::create_game {userId guildId} {
   dict set game(sessions) $guildId [dict create mode 1 chan $channelId players \
     [list [dict create player $userId chan {} hand {} inplay {} host 1]] \
     pile [list] parent $parentId after $afterId playerlist [list $userId] \
-    currentIdx "" targetId "" responses "" \
+    currentIdx "" targetId "" responses "" activated ""\
   ]
 
   set msg "<@$userId> is hosting a game of War of the Seas. Type `!join` to join the game, you have [expr {$game(jointimeout)/1000}] seconds to join. Up to 3 additional players can join the game."
@@ -236,7 +239,7 @@ proc wots::join_game {guildId channelId userId} {
     }
     1 {
       set cplayers [dict get $game(sessions) $guildId players]
-      lappend cplayers [dict create player $userId chan {} hand {} host 0]
+      lappend cplayers [dict create player $userId chan {} hand {} inplay {} host 0]
       dict set game(sessions) $guildId players $cplayers
       
       set playerlist [dict get $game(sessions) $guildId playerlist]
@@ -310,7 +313,6 @@ proc wots::start_game {guildId channelId userId} {
   }
   
   set players [dict get $game(sessions) $guildId players]
-  
   if {$userId != [dict get [lindex $players 0] player]} {
     return
   }
@@ -324,35 +326,36 @@ proc wots::start_game {guildId channelId userId} {
   }
   
   dict set game(sessions) $guildId mode 2
-  
   set parentId [dict get $game(sessions) $guildId parent]
-  
-  if {[catch {discord getRoles $::session $guildId 1} resCoro]} {
-    return
-  }
-  if {$resCoro eq {}} {return}
-  yield $resCoro
-  set response [$resCoro]
-  set roles [lindex $response 0]
-  set permissions [list]
-  set view_channel_bit [dict get $::discord::PermissionValues VIEW_CHANNEL]
-  foreach role $roles {
-    set roleId [dict get $role id]
-    lappend permissions [dict create id $roleId type "role" allow 0 \
-      deny [expr {$view_channel_bit}]]
-  }
-  set channel_perms [::discord::setPermissions 0 {
-    VIEW_CHANNEL SEND_MESSAGES READ_MESSAGE_HISTORY
-  }]
-  lappend permissions [dict create id [dict get [set ${::session}::self] id] \
-    type "member" allow $channel_perms deny 0]
   
   set admins 0
   foreach player $players {
-    if {[::meta::hasPerm $userId ADMINISTRATOR]} {
+    if {[::meta::hasPerm [dict get $player player] {ADMINISTRATOR MANAGE_GUILD}]} {
       set admins 1
       break
     }
+  }
+  
+  if {!$admins} {
+    if {[catch {discord getRoles $::session $guildId 1} resCoro]} {
+      return
+    }
+    if {$resCoro eq {}} {return}
+    yield $resCoro
+    set response [$resCoro]
+    set roles [lindex $response 0]
+    set permissions [list]
+    set view_channel_bit [dict get $::discord::PermissionValues VIEW_CHANNEL]
+    foreach role $roles {
+      set roleId [dict get $role id]
+      lappend permissions [dict create id $roleId type "role" allow 0 \
+        deny [expr {$view_channel_bit}]]
+    }
+    set channel_perms [::discord::setPermissions 0 {
+      VIEW_CHANNEL SEND_MESSAGES READ_MESSAGE_HISTORY
+    }]
+    lappend permissions [dict create id [dict get [set ${::session}::self] id] \
+      type "member" allow $channel_perms deny 0]
   }
   
   # Set up private channels
@@ -374,7 +377,7 @@ proc wots::start_game {guildId channelId userId} {
         }
       }
       
-      set playerPerms [list {*}$permissions [dict create id $playerId z
+      set playerPerms [list {*}$permissions [dict create id $playerId \
         type "member" allow $channel_perms deny 0]]
       
       set data [dict create type 0 topic $topic permission_overwrites $playerPerms]
@@ -467,15 +470,15 @@ proc wots::kill_game {guildId channelId userId {auto 0} {arg "N"}} {
     set mode [dict get $game(sessions) $guildId mode]
     set players [dict get $game(sessions) $guildId players]
     if {$mode == 1} {
-      if {$auto} {
+      if {$auto == 1} {
         set msg "No players joined the game. The game was aborted."
-      } else {
+      } elseif {$auto == 0} {
         set msg "The current game has been aborted by <@$userId>."
       }
     } elseif {$mode > 1} {
-      if {$auto} {
+      if {$auto == 1} {
         set msg "The game has been aborted: insufficient players to continue the game."
-      } else {
+      } elseif {$auto == 0} {
         set msg "The current game has been aborted by <@$userId>."
       }
       
@@ -502,7 +505,7 @@ proc wots::kill_game {guildId channelId userId {auto 0} {arg "N"}} {
     
     # If we are keeping scores, calculate here
     
-    ::meta::putdc [dict create content $msg] 0 $channelId
+    announce $guildId $msg
     dict unset game(sessions) $guildId
   }
 }
@@ -519,7 +522,7 @@ proc wots::kill_player {guildId channelId userId {auto 0} {arg "N"}} {
       set player [lindex $players $i]
       if {[dict get $player player] == $userId} {
         set playerchan [dict get $player chan]
-        if {$playerchan != ""} {
+        if {$playerchan != "" && $playerchan != "DM"} {
           catch {discord deleteChannel $::session $playerchan}
         }
         if {$i == 0} {
@@ -528,12 +531,10 @@ proc wots::kill_player {guildId channelId userId {auto 0} {arg "N"}} {
             dict set nextPlayerData host 1
             set nextId [dict get $nextPlayerData player]
             set players [lreplace $players $i+1 $i+1 $nextPlayerData]
-            set host " <@nextId> is the new host."
+            set host " <@$nextId> is the new host."
           }
         }
         
-        set players [lreplace $players $i $i]
-        set playerlist [lreplace $playerlist $i $i]
         incr found
         break
       }
@@ -542,19 +543,26 @@ proc wots::kill_player {guildId channelId userId {auto 0} {arg "N"}} {
     if {$found == 0} {return}
     
     # To resume game properly e.g. if removed player was current player
+    set mode [dict get $game(sessions) $guildId mode]
     
+    if {$auto == 1} {
+      set msg "<@$userId> has been removed from the game due to inactivity."
+      if {$host != ""} {append msg $host}
+      announce $guildId $msg
+    } elseif {$auto == 0} {
+      set msg "<@$userId> has been removed from the game."
+      if {$host != ""} {append msg $host}
+      announce $guildId $msg
+    }
+    
+    set players [lreplace $players $i $i]
+    set playerlist [lreplace $playerlist $i $i]
     dict set game(sessions) $guildId players $players
     dict set game(sessions) $guildId playerlist $playerlist
-    if {$auto} {
-      set msg "<@$userId> has been removed from the game due to inactivity.$host"
-    } else {
-      set msg "<@$userId> has been removed from the game.$host"
-    }
-    announce $guildId $msg
     
     remove_timers $guildId $userId
     
-    if {[dict get $game(sessions) $guildId mode] > 1 && [llength $players] == 2} {
+    if {$mode > 1 && [llength $players] <= 1} {
       kill_game $guildId $channelId $userId 1 "Y"
     } else {
       for {set i 0} {$i < [llength $game(listeners)]} {incr i} {
@@ -618,7 +626,7 @@ proc wots::target {guildId atkId targets select} {
   remove_timers $guildId $atkId
   
   set defId [lindex $targets $select-1]
-  dict set $game(sessions) $guildId targetId $defId
+  dict set game(sessions) $guildId targetId $defId
   set msg "<@$atkId> has picked <@$defId> as target!"
   announce $guildId $msg
   
@@ -669,10 +677,12 @@ proc wots::target {guildId atkId targets select} {
 proc wots::play {guildId userId select} {
   variable game
   
+  remove_timers $guildId $userId
+  
   set players [dict get $game(sessions) $guildId players]
-  foreach player $players {
+  for {set i 0} {$i < [llength $players]} {incr i} {
+    set player [lindex $players $i]
     if {[dict get $player player] == $userId} {
-      remove_timers $guildId $userId
       set hand [dict get $player hand]
       set card [lindex $hand $select-1]
       set hand [lreplace $hand $select-1 $select-1]
@@ -680,16 +690,17 @@ proc wots::play {guildId userId select} {
       set inplay [dict get $player inplay]
       lappend inplay $card
       dict set player inplay $inplay
+      set players [lreplace $players $i $i $player]
       break
     }
   }
-  dict set guild(sessions) $guildId players $players
+  dict set game(sessions) $guildId players $players
   
   announce $guildId "<@$userId> has set $card!"
   
-  if {[dict get $guild(sessions) $guildId reponses] != ""} {return}
+  if {[dict get $game(sessions) $guildId responses] != ""} {return}
   
-  dict set game(sessions) mode 4
+  dict set game(sessions) $guildId mode 4
   
   set defId [dict get $game(sessions) $guildId targetId]
   foreach player [dict get $game(sessions) $guildId players] {
@@ -700,35 +711,37 @@ proc wots::play {guildId userId select} {
   }
   set atkIdx [dict get $game(sessions) $guildId currentIdx]
   set atkData [lindex [dict get $game(sessions) $guildId players] $atkIdx]
+  set atkId [dict get $atkData player]
   battle $guildId $atkId $atkData $defId $defData
 }
 
-proc wots::battle {guildId atkId atkData defId defData} {
+proc wots::battle {guildId userId userData callerId callerData} {
   variable game
-  
-  switch [dict get $game(sessions) mode] {
+  set mode [dict get $game(sessions) $guildId mode]
+  switch $mode {
     4 { ;# Defender ability
-      dict set game(sessions) mode 5
-      use_ability $guildId $defId $defData $atkId $atkData
+      dict set game(sessions) $guildId mode [incr mode]
+      use_ability $guildId $callerId $callerData $userId $userData
     }
     5 { ;# Attacker ability
-      dict set game(sessions) mode 6
-      use_ability $guildId $atkId $atkData $defId $defData 
+      dict set game(sessions) $guildId mode [incr mode]
+      use_ability $guildId $userId $userData $callerId $callerData
     }
     6 { ;# Defender recon call
-    
+      dict set game(sessions) $guildId mode [incr mode]
+      #recon_call $guildId
     }
     7 { ;# Attacker recon call
-    
+      dict set game(sessions) $guildId mode [incr mode]
     }
     8 { ;# Battle resolve
-    
+      dict set game(sessions) $guildId mode [incr mode]
     }
     9 { ;# Winner draw
-    
+      dict set game(sessions) $guildId mode [incr mode]
     }
     10 { ;# Pick new attacker
-    
+      dict set game(sessions) $guildId mode [incr mode]
     }
   }
 }
@@ -736,18 +749,19 @@ proc wots::battle {guildId atkId atkData defId defData} {
 proc wots::use_ability {guildId userId userData callerId callerData} {
   variable game
   
-  set card [dict get $userData inplay]
+  set inplay [dict get $userData inplay]
+  set card [lindex $inplay 0]
   lassign [split $card] suit value
   if {$value < 5} {
     set cmd [list ::wots::value_call $guildId $userId $userData $callerId \
       $callerData $card]
     lappend game(listeners) [dict create id $userId cmd $cmd word {Y N}]
     incr ::listener
-    private_say $channelId $userId \
+    private_say [dict get $userData chan] $userId \
       "Would you like to activate your card's ability? (Y/N)"
     add_timer $guildId [dict get $userData chan] $userId
   } else {
-    battle $guildId $userId $userData $callerId $callerData
+    battle $guildId $callerId $callerData $userId $userData
   }
 }
 
@@ -762,11 +776,11 @@ proc wots::value_call {guildId userId userData callerId callerData card select} 
       $userData $card]
     lappend game(listeners) [dict create id $callerId cmd $cmd word {Y N}]
     incr ::listener
-    private_say $channelId $callerId \
+    private_say [dict get $callerData chan] $callerId \
       "Would you like to make a value call to block your opponent's card ability? (Y/N)"
     add_timer $guildId [dict get $callerData chan] $callerId
   } else {
-    battle $guildId $userId $userData $callerId $callerData
+    battle $guildId $callerId $callerData $userId $userData
   }
 }
 
@@ -781,7 +795,7 @@ proc wots::block_ability {guildId userId userData callerId callerData card selec
       $callerData $card]
     lappend game(listeners) [dict create id $userId cmd $cmd word {1 2 3 4}]
     incr ::listener
-    private_say $channelId $callerId \
+    private_say [dict get $userData chan] $userId \
       "Please insert the value of the card (1, 2, 3 or 4)"
     add_timer $guildId [dict get $userData chan] $userId
   } else {
@@ -799,26 +813,317 @@ proc wots::guess_value {guildId userId userData targetId targetData card select}
   if {$select == $value} {
     append msg " The guess is right! The card ability of <@$targetId> gets blocked!"
     announce $guildId $msg
-    battle $guildId $callerId $callerData $userId $userData
+    battle $guildId $userId $userData $targetId $targetData
   } else {
     append msg " The guess is wrong! The card ability of <@$targetId> proceeds!"
     announce $guildId $msg
-    activate_ability $guildId $callerId $callerData $userId $userData $card
+    activate_ability $guildId $targetId $targetData $userId $userData $card
   }
 }
 
 proc wots::activate_ability {guildId userId userData targetId targetData card} {
   variable game
   
+  lassign $card suit value
+  set activated [dict get $game(sessions) $guildId activated]
+  lappend activated $userId
   
+  switch $suit {
+    "Skull" {
+      set hand [dict get $targetData hand]
+      set inplay [dict get $targetData inplay]
+      
+      if {[llength $inplay] > 1} {
+        announce $guildId "<@$userId>'s Mutiny activates!"
+        
+        set num 1
+        set selection [list]
+        foreach card $inplay {
+          lappend selection "$num. Card $num"
+          incr num
+        }
+        
+        set cmd [list ::wots::select_inplay $guildId $userId $userData \
+          $targetId $targetData]
+        set num 0
+        lappend game(listeners) [dict create id $userId cmd $cmd \
+          word [list {*}[lmap i $inplay {incr num}]]]
+        set msg "Select a card to take:\n```[join $selection \n]```"
+        private_say [dict get $userData chan] $userId $msg
+        incr ::listener 1
+        add_timer $guildId [dict get $userData chan] $userId
+        return
+      } else {
+        set card [lindex $inplay 0]
+        set inplay [dict get $userData inplay]
+        lappend inplay $card
+        dict set userData inplay $inplay
+        dict set targetData inplay ""
+        
+        for {set i 0} {$i < [llength $players]} {incr i} {
+          set player [lindex $players $i]
+          if {[dict get $player player] == $targetId} {
+            lset players $i $targetData
+          } elseif {[dict get $player player] == $userId} {
+            lset players $i $userData
+          }
+        }
+        dict set game(sessions) $guildId players $players
+        
+        announce $guildId "<@$userId>'s Mutiny activates! <@$targetId>'s card goes to <@$userId>!"
+        
+        if {$hand == ""} {
+          announce $guildId "<@$targetId> is unable to play another card! <@$targetId loses the battle!"
+        } else {
+          set num 1
+          set selection [list]
+          foreach card $hand {
+            lappend selection "$num. $card"
+            incr num
+          }
+        
+          set cmd [list ::wots::play_new $guildId $targetId $targetData \
+            $userId $userData 1]
+          set num 0
+          lappend game(listeners) [dict create id $targetId cmd $cmd \
+            word [list {*}[lmap i [dict get $targetData hand] {incr num}]]]
+          set msg "Select a new card to play:\n```[join $selection \n]```"
+          private_say [dict get $targetData chan] $targetId $msg
+          incr ::listener 1
+          add_timer $guildId [dict get $targetData chan] $targetId
+          return
+        }
+      }
+    }
+    "Ship" {
+      set card [draw $guildId]
+      if {$card == ""} {
+        announce $guildId "<@$userId>'s Reinforcements activates but fails! The card pile is empty!"
+      } else {
+        announce $guildId "<@$userId>'s Reinforcements activates! <@$userId> draws a card!"
+        
+        set hand [dict get $userData hand]
+        lappend hand $card
+        dict set userData hand $hand
+        
+        set players [dict get $game(sessions) $guildId players]
+        for {set i 0} {$i < [llength $players]} {incr i} {
+          set player [lindex $players $i]
+          if {$userId == [dict get $player player]} {
+            lset players $i $userData
+            break
+          }
+        }
+        dict set game(sessions) $guildId players $players
+        
+        set num 1
+        set selection [list]
+        foreach card [dict get $userData hand] {
+          lappend selection "$num. $card"
+          incr num
+        }
+        
+        set cmd [list ::wots::play_new $guildId $userId $userData \
+          $targetId $targetData 0]
+        set num 0
+        lappend game(listeners) [dict create id $userId cmd $cmd \
+          word [list {*}[lmap i [dict get $userData hand] {incr num}]]]
+        set msg "Select a new card to play:\n```[join $selection \n]```"
+        private_say [dict get $userData chan] $userId $msg
+        incr ::listener 1
+        add_timer $guildId [dict get $userData chan] $userId
+        return
+      }
+    }
+    "Sword" {
+      set hand [dict get $targetData hand]
+      if {[llength $hand] == 0} {
+        announce $guildId "<@$userId>'s Steal activates but fails! <@$targetId> has no card in hand!"
+      } else {
+        set id [expr {int(rand()*[llength $hand])}]
+        set card [lindex $hand $id]
+        
+        set inplay [dict get $userData inplay]
+        lappend inplay $card
+        dict set userData inplay $inplay
+        
+        set hand [dict get $targetData hand]
+        set hand [lreplace $hand $id $id]
+        dict set targetData hand $hand
+        
+        set players [dict get $game(sessions) $guildId players]
+        for {set i 0} {$i < [llength $players]} {incr i} {
+          set player [lindex $players $i]
+          if {[dict get $player player] == $userId} {
+            lset players $i $userData
+          } elseif {[dict get $player player] == $targetId} {
+            lset players $i $targetData
+          }
+        }
+        dict set game(sessions) $guildId players $players
+        announce $guildId "<@$userId>'s Steal activates and takes $card from <@$targetId>! <@$userId> plays $card!"
+      }
+    }
+    "Coin" {
+      set hand [dict get $userData hand]
+      if {$hand == ""} {
+        set card [draw $guildId]
+        if {$card == ""} {
+          announce $guildId "<@$userId>'s Trade activates but fails! The card pile is empty!"
+        } else {
+          announce $guildId "<@$userId>'s Trade activates! <@$userId> draws a card!"
+          
+          set hand [dict get $userData hand]
+          lappend hand $card
+          dict set userData hand $hand
+          
+          set players [dict get $game(sessions) $guildId players]
+          for {set i 0} {$i < [llength $players]} {incr i} {
+            set player [lindex $players $i]
+            if {$userId == [dict get $player player]} {
+              lset players $i $userData
+              break
+            }
+          }
+          dict set game(sessions) $guildId players $players
+        }
+      } else {
+        announce $guildId "<@$userId>'s Trade activates!"
+        
+        set num 1
+        set selection [list]
+        foreach card [dict get $userData hand] {
+          lappend selection "$num. $card"
+          incr num
+        }
+        
+        set cmd [list ::wots::discard $guildId $userId $userData \
+          $targetId $targetData]
+        set num 0
+        lappend game(listeners) [dict create id $userId cmd $cmd \
+          word [list {*}[lmap i [dict get $userData hand] {incr num}]]]
+        set msg "Select a card to discard:\n```[join $selection \n]```"
+        private_say [dict get $userData chan] $userId $msg
+        incr ::listener 1
+        add_timer $guildId [dict get $userData chan] $userId
+        return
+      }
+    }
+  }
+  battle $guildId $targetId $targetData $userId $userData
 }
+
+proc wots::play_new {guildId userId userData targetId targetData reverse select} {
+  variable game
+  
+  remove_timers $guildId $userId
+  set players [dict get $game(sessions) $guildId players]
+  
+  set hand [dict get $userData hand]
+  set card [lindex $hand $select-1]
+  set hand [lreplace $hand $select-1 $select-1]
+  dict set userData hand $hand
+  set inplay [dict get $userData inplay]
+  lappend inplay $card
+  dict set userData inplay $inplay
+  
+  for {set i 0} {$i < [llength $players]} {incr i} {
+    set player [lindex $players $i]
+    if {[dict get $player player] == $userId} {
+      lset players $i $userData
+      break
+    }
+  }
+  dict set game(sessions) $guildId players $players
+  announce $guildId "<@$userId> has set $card!"
+  if {$reverse} {
+    battle $guildId $userId $userData $targetId $targetData
+  } else {
+    battle $guildId $targetId $targetData $userId $userData
+  }
+}
+
+proc wots::select_inplay {guildId userId userData targetId targetData select} {
+  variable game
+  
+  remove_timers $guildId $userId
+  set players [dict get $game(sessions) $guildId players]
+  
+  set inplay [dict get $targetData inplay]
+  set card [lindex $inplay $select-1]
+  set inplay [lreplace $inplay $select-1 $select-1]
+  dict set targetData inplay $inplay
+  
+  set inplay [dict get $userData inplay]
+  lappend inplay $card
+  dict set userData inplay $inplay
+  
+  for {set i 0} {$i < [llength $players]} {incr i} {
+    set player [lindex $players $i]
+    if {[dict get $player player] == $targetId} {
+      lset players $i $targetData
+    } elseif {[dict get $player player] == $userId} {
+      lset players $i $userData
+    }
+  }
+  dict set game(sessions) $guildId players $players
+  announce $guildId "<@$userId> has stolen $card from <@$targetId>!"
+  
+  battle $guildId $targetId $targetData $userId $userData
+}
+
+proc wots::discard {guildId userId userData targetId targetData select} {
+  variable game
+  
+  remove_timers $guildId $userId
+  set players [dict get $game(sessions) $guildId players]
+  
+  set hand [dict get $userData hand]
+  set card [lindex $hand $select-1]
+  set hand [lreplace $hand $select-1 $select-1]
+  dict set userData hand $hand
+  
+  for {set i 0} {$i < [llength $players]} {incr i} {
+    set player [lindex $players $i]
+    if {[dict get $player player] == $userId} {
+      lset players $i $userData
+      break
+    }
+  }
+  dict set game(sessions) $guildId players $players
+  set msg "<@$userId> has discarded $card"
+  
+  set card [draw $guildId]
+  if {$card == ""} {
+    append msg "! Unfortunately the card pile is empty!"
+  } else {
+    append msg " and draws a card!"
+    
+    set hand [dict get $userData hand]
+    lappend hand $card
+    dict set userData hand $hand
+    
+    set players [dict get $game(sessions) $guildId players]
+    for {set i 0} {$i < [llength $players]} {incr i} {
+      set player [lindex $players $i]
+      if {$userId == [dict get $player player]} {
+        lset players $i $userData
+        break
+      }
+    }
+    dict set game(sessions) $guildId players $players
+  }
+        
+  battle $guildId $targetId $targetData $userId $userData
+}
+
+proc wots::recon_call {$guildId} {}
 
 ##
 # Helpers
 ##
 proc wots::announce {guildId msg} {
   variable game
-  if {[regexp {has set ()} $msg]} {}
   ::meta::putdc [dict create content [card_mask $msg]] 0 \
     [dict get $game(sessions) $guildId chan]
   foreach player [dict get $game(sessions) $guildId players] {
@@ -826,42 +1131,49 @@ proc wots::announce {guildId msg} {
   }
 }
 
+proc wots::private_say {channelId userId msg} {
+  variable game
+  set msg [youify $userId $msg]
+  if {$channelId == "DM"} {
+    ::meta::putdcPM $userId [dict create content $msg] 0
+  } elseif {$channelId != ""} {
+    ::meta::putdc [dict create content $msg] 0 $channelId
+  }
+}
+
+proc wots::card_mask {text} {
+  if {[regexp {has set \w+ \d+} $text]} {
+    regsub {has set \w+ \d+} $text "has set a card" text
+  }
+  return $text
+}
+
 proc wots::youify {userId text} {
   set mappings {
     " was" " were"
     " has" " have"
     " is"  " are"
-    " activates" " activates"
+    " activates" " activate"
     " raises" " raise"
+    " loses" " lose"
+    " draws" " draw"
+    " calls" " call"
+    " plays" " play"
   }
-  if {[regexp {sets \w+ \d+} $text]} {
-    regsub {set \w+ \d+} $text "set a card" text
-  } else {
-    regsub -all -- "<@$userId>( \w+)?" $text {you[string map $mappings "\1"]} \
-      text
+  set secondary {
+    "you's" "your"
+    "their" "your"
+    "The card ability of you" "Your card's ability"
+  }
+  if {[regsub -all -- "<@$userId>( \\w+)?" $text \
+    [format {you[string map {%s} "\1"]} $mappings] text] > 0} {
     set text [subst $text]
+    set text [string map $secondary $text]
+    regsub -all -- {(^|[.!?] )you(r)?\y} $text {\1You\2} text
+  } else {
+    set text [card_mask $text]
   }
   return $text
-}
-
-proc wots::private_say {channelId userId msg} {
-  variable game
-  set msg [string totitle [youify $userId $msg]]
-  if {$channelId == "DM"} {
-    ::meta::putdcPM $userId [dict create content $msg] 0
-  } elseif {$channelId != ""} {
-    ::meta::putdc [dict create content $msg] 0 $chan
-  }
-}
-
-proc wots::remove_timers {guildId userId} {
-  variable game
-  set responses [dict get $game(sessions) $guildId responses]
-  if {![catch {dict get $responses $userId} ids]} {
-    foreach id $ids {after cancel $id}
-    dict unset responses $userId
-    dict set $game(sessions) $guildId reponses $responses
-  }
 }
 
 proc wots::check_game {guildId channelId userId {warning 0}} {
@@ -878,10 +1190,10 @@ proc wots::check_game {guildId channelId userId {warning 0}} {
         }
       }
     }
-    2 -
-    3 {
+    default {
       if {$warning} {
-        private_say $channelId $userId "Warning: You have [expr {($game(playtimeout)-$game(playwarning))/1000}] more seconds to make your selection before you timeout."
+        private_say $channelId $userId \
+          "Warning: You have [expr {($game(playtimeout)-$game(playwarning))/1000}] more seconds to make your selection before you time out."
       } else {
         kill_player $guildId $channelId $userId 1 "Y"
       }
@@ -891,12 +1203,35 @@ proc wots::check_game {guildId channelId userId {warning 0}} {
 
 proc wots::add_timer {guildId channelId userId} {
   variable game
-  
-  set responses [dict get $game(sessions) $guildId reponses]
+  set responses [dict get $game(sessions) $guildId responses]
   set id1 [after $game(playwarning) [list ::wots::check_game $guildId $channelId $userId 1]]
   set id2 [after $game(playtimeout) [list ::wots::check_game $guildId $channelId $userId 0]]
   dict set responses $userId [list $id1 $id2]
-  dict set game(sessions) $guildId reponses $responses
+  dict set game(sessions) $guildId responses $responses
+}
+
+proc wots::remove_timers {guildId userId} {
+  variable game
+  set responses [dict get $game(sessions) $guildId responses]
+  if {![catch {dict get $responses $userId} ids]} {
+    foreach id $ids {after cancel $id}
+    dict unset responses $userId
+    dict set game(sessions) $guildId responses $responses
+  }
+}
+
+proc wots::draw {guildId} {
+  variable game
+  
+  set pile [dict get $game(sessions) $guildId pile]
+  set card [lindex $pile 0]
+  if {$card == ""} {
+    return ""
+  } else {
+    set pile [lreplace $pile 0 0]
+    dict set game(sessions) $guildId pile $pile
+    return $card
+  }
 }
 
 ##
