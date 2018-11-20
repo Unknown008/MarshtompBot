@@ -1,10 +1,27 @@
+# WarOfTheSeas.tcl --
+#
+#       This file implements the Tcl code for managing and running a game of War
+#       of the Seas
+#
+# Copyright (c) 2018, Jerry Yong
+#
+# See the file "LICENSE" for information on usage and redistribution of this
+# file.
+
+package require sqlite3
+
+if {![namespace exists meta]} {
+  puts "Failed to load WarOfTheSeas.tcl: Requires meta.tcl to be loaded."
+  return
+}
+
 namespace eval wots {
   sqlite3 wotsdb "${scriptDir}/wotsdb.sqlite3"
   
   # Game Sessions
   set game(sessions)     [list]
   # Help
-  set game(help)         ""
+  set game(help)         "https://pastebin.com/V4SDY0Ek"
   set game(deck)         [list]
   set game(defaultChan)  "waroftheseas-spectator"
   set game(defaultCat)   "games"
@@ -27,12 +44,12 @@ namespace eval wots {
   if {![wotsdb exists {SELECT 1 FROM config}]} {
     wotsdb eval {
       INSERT INTO config VALUES
-      ('disabledGuilds', ''),
-      ('disabledChans', ''),
-      ('bannedUsers', ''),
-      ('jointimeout', '120000'),
-      ('playwarning', '240000'),
-      ('playtimeout', '300000')
+        ('disabledGuilds', ''),
+        ('disabledChans', ''),
+        ('bannedUsers', ''),
+        ('jointimeout', '120000'),
+        ('playwarning', '240000'),
+        ('playtimeout', '300000')
     }
     set game(jointimeout) 120000
     set game(playwarning) 240000
@@ -94,7 +111,7 @@ proc wots::command {} {
     "!in" -
     "!join" {join_game $guildId $channelId $userId}
     "!out" -
-    "!drop" {drop_player $guildId $channelId $userId}
+    "!drop" {drop_player $guildId $channelId $userId [lindex $text 1]}
     
     "!wotsset" {
       if {![hasPerm $userId {ADMINISTRATOR MANAGE_GUILD}]} {return}
@@ -192,6 +209,7 @@ proc wots::create_game {userId guildId} {
       set parentId [dict get $data id]
     } 
     set topic "Spectator room for War of the Seas game"
+    append topic " (basic commands: !host !join !start !stop !pause !resume)"
     if {
       [catch {
         discord createChannel $::session $guildId $channelname \
@@ -776,11 +794,11 @@ proc wots::battle {guildId userId userData callerId callerData} {
     }
     6 { ;# Defender recon call
       dict set game(sessions) $guildId mode [incr mode]
-      ask_recon $guildId $callerId $callerData $userId $userData
+      ask_recon $guildId $userId $userData $callerId $callerData
     }
     7 { ;# Attacker recon call
       dict set game(sessions) $guildId mode [incr mode]
-      ask_recon $guildId $userId $userData $callerId $callerData
+      ask_recon $guildId $callerId $callerData $userId $userData
     }
     8 { ;# Battle resolve & draw
       dict set game(sessions) $guildId mode [incr mode]
@@ -1674,8 +1692,10 @@ proc wots::check_game {guildId channelId userId {warning 0}} {
     }
     default {
       if {$warning} {
-        private_say $channelId $userId \
-          "Warning: You have [expr {($game(playtimeout)-$game(playwarning))/1000}] more seconds to make your selection before you time out."
+        set msg "Warning: You have "
+        append msg "[expr {($game(playtimeout)-$game(playwarning))/1000}] more "
+        append msg "seconds to make your selection before you time out."
+        private_say $channelId $userId $msg
       } else {
         kill_player $guildId $channelId $userId 1 "Y"
       }
@@ -1763,7 +1783,7 @@ proc wots::settings {guildId channelId userId args} {
         set value [lindex $setting [incr i]]
         default_category $guildId $channelId $userId $value
       }
-      channel {
+      default_channel {
         set value [lindex $setting [incr i]]
         default_channel $guildId $channelId $userId $value
       }
