@@ -75,58 +75,32 @@ It is the only other command that can be used in any channel. Available to users
 When a game has begun, use numbers to tell the bot what you want to do. For example, the bot will first decide on the attacker randomly and ask the player who they want to attack. In this situation, post a number which will correspond to one of the players. At other times, the bot will ask a player which card to play. Post a number and the bot will understand that you have played a card with the corresponding number.
 
 1. Each player gets dealt out seven cards, this forms their crew. The rest of the cards are placed in the middle of the table, this is the card pile.
-
 2. One of the players will be randomly chosen to be the attacker on the first turn.
-
 3. The attacker will pick a player (called defender) against whom to battle.
-
 4. Both the attacker and the defender will set a card in front of them.
-
 5. The defender can choose to activate the ability of their card if the card has a value between 1 and 4 inclusive. Before the ability revolves, the attacker may choose to block the ability by calling its value (calling type is not allowed here).
-
-    a. If the attacker calls the right value, the ability is blocked and the game resumes with the next step.
-
-    b. If the attacker calls a wrong value, the defender will act according to the effect of the ability.
-   
+  a. If the attacker calls the right value, the ability is blocked and the game resumes with the next step.
+  b. If the attacker calls a wrong value, the defender will act according to the effect of the ability.
 6. The attacker can choose to activate the ability of their card if the card has a value between 1 and 4 inclusive. Before the ability resolves, the defender may choose to block the ability by calling its value (calling type is not allowed here).
-
-    a. If the defender calls the right value, the ability is blocked and the game resumes with the next step.
-   
-    b. If the attacker calls a wrong value, the attacker will act according to the effect of the ability.
-   
+  a. If the defender calls the right value, the ability is blocked and the game resumes with the next step.
+  b. If the attacker calls a wrong value, the attacker will act according to the effect of the ability.
 7. The defender can choose to make a Recon Call (call either the value or the type of the attacker’s card – if the attacker activated their card’s ability during this battle, the defender cannot make a type call).
-
-    a. If the defender calls a value call, 
-   
-       i. and guesses correctly, the attacker loses the battle and the defender draws a card from the card pile.
-      
-       ii. and guesses incorrectly, the game resumes with the next step.
-      
-    b. If the defender calls a type call,
-   
-       i. and guesses correctly, the attacker loses 3 points to their card
-      
-       ii. and guesses incorrectly, the defender loses the battle and the attacker draws a card from the card pile.
-      
+ a. If the defender calls a value call, 
+   i. and guesses correctly, the attacker loses the battle and the defender draws a card from the card pile.
+   ii. and guesses incorrectly, the game resumes with the next step.
+ b. If the defender calls a type call,
+   i. and guesses correctly, the attacker loses 3 points to their card
+   ii. and guesses incorrectly, the defender loses the battle and the attacker draws a card from the card pile.
 8. The attacker can choose to make a Recon Call (call either the value or the type of the defender’s card - if the defender activated their card’s ability during this battle, the attacker cannot make a type call).
-
-    a. If the attacker calls a value call, 
-    
-       i. and guesses correctly, the defender loses the battle and the attacker draws a card from the card pile.
-       ii. and guesses incorrectly, the game resumes with the next step.
-       
-    b. If the attacker calls a type call,
-    
-       i. and guesses correctly, the defender loses 3 points to their card
-       
-       ii. and guesses incorrectly, the attacker loses the battle and the defender draws a card from the card pile.
-       
+  a. If the attacker calls a value call, 
+    i. and guesses correctly, the defender loses the battle and the attacker draws a card from the card pile.
+    ii. and guesses incorrectly, the game resumes with the next step.
+  b. If the attacker calls a type call,
+    i. and guesses correctly, the defender loses 3 points to their card
+    ii. and guesses incorrectly, the attacker loses the battle and the defender draws a card from the card pile.   
 9. At this point if neither the attacker nor defender lost, the player with the highest total score on their cards wins the battle.
-
 10. The winner draws a card from the card pile.
-
 11. The person to the left of the attacker then becomes the new attacker.
-
 12. Steps 3 through 11 will be repeated until only one player stands with a crew.
 
 ## Ability Cards
