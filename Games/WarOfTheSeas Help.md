@@ -50,22 +50,22 @@ Display the link to this page.
 
 It is the only other command that can be used in any channel. Available to users with the Manage Guild role or higher. Sub commands are as follow:
 
-&npsp;&npsp;&npsp;&npsp;**guild on|off**
+&nbsp;&nbsp;&nbsp;&nbsp;**guild on|off**
 
-&npsp;&npsp;&npsp;&npsp;By default, the game is enabled on a server. Use **!wotsset guild off** to disable it.
+&nbsp;&nbsp;&nbsp;&nbsp;By default, the game is enabled on a server. Use **!wotsset guild off** to disable it.
      
-&npsp;&npsp;&npsp;&npsp;**channel on|off channel**
+&nbsp;&nbsp;&nbsp;&nbsp;**channel on|off channel**
 
-&npsp;&npsp;&npsp;&npsp;By default, the game is enabled on all channels. Use **!wotsset channel off #channel** to disable it on the specified channel. Multiple channels can be specified by enclosing the channels between braces e.g. {#chan1 #chan2}.
+&nbsp;&nbsp;&nbsp;&nbsp;By default, the game is enabled on all channels. Use **!wotsset channel off #channel** to disable it on the specified channel. Multiple channels can be specified by enclosing the channels between braces e.g. {#chan1 #chan2}.
      
-&npsp;&npsp;&npsp;&npsp;**ban on|off user**
+&nbsp;&nbsp;&nbsp;&nbsp;**ban on|off user**
 
-&npsp;&npsp;&npsp;&npsp;Bans the user from all War of the Seas commands. Multiple users can be specified by enclosing the users between braces e.g. {@user1 @user2}
+&nbsp;&nbsp;&nbsp;&nbsp;Bans the user from all War of the Seas commands. Multiple users can be specified by enclosing the users between braces e.g. {@user1 @user2}
      
-&npsp;&npsp;&npsp;&npsp;**category**
+&nbsp;&nbsp;&nbsp;&nbsp;**category**
 
-&npsp;&npsp;&npsp;&npsp;Sets the category name where the War of the Seas channels will be managed by the bot. The default category name is "games".
+&nbsp;&nbsp;&nbsp;&nbsp;Sets the category name where the War of the Seas channels will be managed by the bot. The default category name is "games".
      
-&npsp;&npsp;&npsp;&npsp;**default_channel**
+&nbsp;&nbsp;&nbsp;&nbsp;**default_channel**
      
-&npsp;&npsp;&npsp;&npsp;Sets the name of the channel where the War of the Seas commands can be used and where I will put the game highlights. The default channel name is "waroftheseas-sepctator"
+&nbsp;&nbsp;&nbsp;&nbsp;Sets the name of the channel where the War of the Seas commands can be used and where I will put the game highlights. The default channel name is "waroftheseas-sepctator"
