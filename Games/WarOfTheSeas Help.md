@@ -79,25 +79,25 @@ When a game has begun, use numbers to tell the bot what you want to do. For exam
 3. The attacker will pick a player (called defender) against whom to battle.
 4. Both the attacker and the defender will set a card in front of them.
 5. The defender can choose to activate the ability of their card if the card has a value between 1 and 4 inclusive. Before the ability revolves, the attacker may choose to block the ability by calling its value (calling type is not allowed here).
-   a. If the attacker calls the right value, the ability is blocked and the game resumes with the next step.
-   b. If the attacker calls a wrong value, the defender will act according to the effect of the ability.
+   1. If the attacker calls the right value, the ability is blocked and the game resumes with the next step.
+   2. If the attacker calls a wrong value, the defender will act according to the effect of the ability.
 6. The attacker can choose to activate the ability of their card if the card has a value between 1 and 4 inclusive. Before the ability resolves, the defender may choose to block the ability by calling its value (calling type is not allowed here).
-   a. If the defender calls the right value, the ability is blocked and the game resumes with the next step.
-   b. If the attacker calls a wrong value, the attacker will act according to the effect of the ability.
+   1. If the defender calls the right value, the ability is blocked and the game resumes with the next step.
+   2. If the attacker calls a wrong value, the attacker will act according to the effect of the ability.
 7. The defender can choose to make a Recon Call (call either the value or the type of the attacker’s card – if the attacker activated their card’s ability during this battle, the defender cannot make a type call).
-   a. If the defender calls a value call, 
-      i. and guesses correctly, the attacker loses the battle and the defender draws a card from the card pile.
-      ii. and guesses incorrectly, the game resumes with the next step.
-   b. If the defender calls a type call,
-      i. and guesses correctly, the attacker loses 3 points to their card
-      ii. and guesses incorrectly, the defender loses the battle and the attacker draws a card from the card pile.
+   1. If the defender calls a value call, 
+      1. and guesses correctly, the attacker loses the battle and the defender draws a card from the card pile.
+      2. and guesses incorrectly, the game resumes with the next step.
+   2. If the defender calls a type call,
+      1. and guesses correctly, the attacker loses 3 points to their card
+      2. and guesses incorrectly, the defender loses the battle and the attacker draws a card from the card pile.
 8. The attacker can choose to make a Recon Call (call either the value or the type of the defender’s card - if the defender activated their card’s ability during this battle, the attacker cannot make a type call).
-   a. If the attacker calls a value call, 
-      i. and guesses correctly, the defender loses the battle and the attacker draws a card from the card pile.
-      ii. and guesses incorrectly, the game resumes with the next step.
-   b. If the attacker calls a type call,
-      i. and guesses correctly, the defender loses 3 points to their card
-      ii. and guesses incorrectly, the attacker loses the battle and the defender draws a card from the card pile.   
+   1. If the attacker calls a value call, 
+      1. and guesses correctly, the defender loses the battle and the attacker draws a card from the card pile.
+      2. and guesses incorrectly, the game resumes with the next step.
+   2. If the attacker calls a type call,
+      1. and guesses correctly, the defender loses 3 points to their card
+      2. and guesses incorrectly, the attacker loses the battle and the defender draws a card from the card pile.   
 9. At this point if neither the attacker nor defender lost, the player with the highest total score on their cards wins the battle.
 10. The winner draws a card from the card pile.
 11. The person to the left of the attacker then becomes the new attacker.
