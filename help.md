@@ -27,6 +27,21 @@ Displays some stats of the bot across all servers.
 
 Links to this page.
 
+# Moderation Commands
+
+**!ban _user_**
+
+Bans a user from the bot's commands. **This does not ban the user from the server, you should do that through discord itself**. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+
+
+**!unban _user_**
+
+Unbans a user from the bot's commands. **This does not ban the user from the server, you should do that through discord itself**. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+
+**!bulkdelete _number_**
+
+Deletes the past _number_ messages in the current channel. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command.
+
 # Custom Commands
 
 **!8ball _question_**
@@ -45,9 +60,15 @@ Removes subscription for an anime, or use 'all' to remove all subscriptions.
 
 Displays the user's current anime subscriptions.
 
-**!whois _userId_**
+**!whois _user_**
 
-Gives the information about a specific userId. The userId can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+Gives the information about a specific _user_. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+
+**!snowflake _snowflake_**
+
+Returns the datetimestamp of the snowflake.
+
+# Pokemon related commands
 
 **!hp _IVs_**
 
