@@ -1,3 +1,22 @@
+# custom.tcl --
+#
+#       This file implements the Tcl code for custom commands that don't fit in
+#       a specific category.
+#
+# Copyright (c) 2018, Jerry Yong
+#
+# See the file "LICENSE" for information on usage and redistribution of this
+# file.
+
+package require sqlite3
+package require http
+package require htmlparse
+  
+if {![namespace exists meta]} {
+  puts "Failed to load custom.tcl: Requires meta.tcl to be loaded."
+  return
+}
+
 namespace eval custom {
   sqlite3 customdb "${scriptDir}/customdb.sqlite3"
   customdb eval {
@@ -45,8 +64,6 @@ namespace eval custom {
   set say(speaker)  ""
   set say(sourceId) ""
   set say(targetId) ""
-  
-  package require htmlparse
 }
 
 proc custom::command {} {
@@ -57,9 +74,6 @@ proc custom::command {} {
     }
     "!8ball" {
       ball $guildId [regsub {!8ball *} $text ""]
-    }
-    "!status" {
-      #pro:status [regsub {!status } $text ""]
     }
     "!subscribe" {
       subscribe [regsub {!subscribe *} $text ""]
@@ -75,6 +89,9 @@ proc custom::command {} {
     }
     "!say" {
       say {*}[regsub {!say *} $text ""]
+    }
+    "!snowflake" {
+      snowflake [regsub {!snowflake *} $text ""]
     }
     default {return 0}
   }
@@ -111,12 +128,7 @@ proc custom::say {type {text {}}} {
         upvar guildId guildId
         set attachment [dict get $text attachment]
         set content [dict get $text content]
-        set user [dict get [set ${::session}::users] $userId username]
-        if {![catch {dict get [set ${::session}::users] $userId nick $guildId} nick]} {
-          if {$nick != ""} {
-            set user "$user ($nick)"
-          }
-        }
+        set user [::meta::getUsernameNick $userId $guildId]
         if {$attachment ne ""} {
           set links [lmap x $attachment {dict get $x url}]
           set msg "$content: [join $links {,}]"
@@ -126,6 +138,7 @@ proc custom::say {type {text {}}} {
         ::meta::putdc [dict create content "$user: $msg"] 1 $say(sourceId)
       }
     }
+    stop -
     end {
       if {$userId != $::ownerId || $say(state) != 1} {return}
       set say(state)    0
@@ -168,14 +181,15 @@ proc custom::hp_calc {msg} {
 }
 
 proc custom::ball {guildId arg} {
-  set usage "Ask a question a 'yes/no', 'where', 'who', 'when', 'why' or 'how much' question."
+  set usage "Ask a question a 'yes/no', 'where', 'who', 'when', 'why' or 'how "
+  append usage "much' question."
   if {$arg == ""} {
-    ::meta::putdc [dict create content "**8-ball** usage: $usage"]
+    ::meta::putdc [dict create content "**8-ball** usage: $usage"] 0
     return
   } elseif {![regexp {[?]} $arg match]} {
     ::meta::putdc [dict create content \
       "**Error:** That's not a question! You are missing the question mark!" \
-    ]
+    ] 0
     return
   }
   switch -nocase -regexp -- $arg {
@@ -202,7 +216,7 @@ proc custom::ball {guildId arg} {
 }
 
 proc custom::throw_ball {guildId type} {
-  switch $type {
+  switch -nocase -regexp $type {
     "where" {
       set lanswer [list \
         "In your country." \
@@ -217,7 +231,11 @@ proc custom::throw_ball {guildId type} {
       ]
     }
     "why" {
-      set lonlines [dict get [set ${::session}::guilds] $guildId presences]
+      set guildData [guild eval {
+        SELECT data FROM guild WHERE guildId = :guildId
+      }]
+      set guildData {*}$guildData
+      set lonlines [dict get $guildData presences]
       set ids [lmap user $lonlines {set id "<@[lindex $user 1 1]>"}]
       set name "<@[lindex $ids [expr {int(rand()*[llength $ids])}]]>"
       set lanswer [list \
@@ -233,7 +251,11 @@ proc custom::throw_ball {guildId type} {
       ]
     }
     "who" {
-      set lonlines [dict get [set ${::session}::guilds] $guildId presences]
+      set guildData [guild eval {
+        SELECT data FROM guild WHERE guildId = :guildId
+      }]
+      set guildData {*}$guildData
+      set lonlines [dict get $guildData presences]
       set lanswer [lmap user $lonlines {set id "<@[lindex $user 1 1]>"}]
     }
     "howmuch" {
@@ -297,7 +319,7 @@ proc custom::throw_ball {guildId type} {
         "Most probably not." \
         "Unlikely." \
         "Certainly not!" \
-        "Highly improbable..."
+        "Highly improbable..." \
         "My sources say no." \
         "Can't you see that's a no?" \
         "In your dreams maybe." \
@@ -308,24 +330,6 @@ proc custom::throw_ball {guildId type} {
   return [lindex $lanswer [expr {int(rand()*[llength $lanswer])}]]
 }
 
-proc pro:status {args} {
-  set link "https://pokemonrevolution.net/status.php"
-
-  set token [::http::geturl $link]
-  set file [::http::data $token]
-  ::http::cleanup $token
-  set res [regexp -all -inline {<div id="status-[^\"]"[^>]*>.*?([^<>]+)</h1>} $file]
-  if {$res == "" || [llength $res] != 2} {
-    putdc "Unable to reach website"
-  } else {
-    switch -glob [lindex $args 0] {
-      s* {::meta::putdc "Silver server is [string tolower [lindex $res 0]]."}
-      g* {::meta::putdc "Gold server is [string tolower [lindex $res 0]]."}
-      default {::meta::putdc "Silver server is [string tolower [lindex $res 0]].\nGold server is [string tolower [lindex $res 0]]."}
-    }
-  }
-}
-
 proc custom::checksite {} {
   variable scrapper
   
@@ -333,11 +337,10 @@ proc custom::checksite {} {
     after [expr {$scrapper(delay)*60*1000}] ::custom::checksite
     return
   }
-  set token [::http::geturl $scrapper(site)]
   set file [::http::data $token]
   ::http::cleanup $token
-  
-  if {![regexp -- {<td class="redgr" width="369" valign="top">(.*?)</td>} $file - match]} {
+  set re {<td class="redgr" width="369" valign="top">(.*?)</td>}
+  if {![regexp -- $re $file - match]} {
     after [expr {$scrapper(delay)*60*1000}] ::custom::checksite
     return
   }
@@ -361,9 +364,18 @@ proc custom::checksite {} {
       if {$old != 1} {
         regexp {(.+) \(link: (http[^\)]+)} $ep - title link
         switch -nocase -glob $title {
-          *(raw) {set rep ":regional_indicator_r: :regional_indicator_a: :regional_indicator_w:"}
-          *(sub) {set rep ":regional_indicator_s: :regional_indicator_u: :regional_indicator_b:"}
-          *(preview) {set rep ":regional_indicator_p: :regional_indicator_r: :regional_indicator_e: :regional_indicator_v:"}
+          *(raw) {
+            set rep ":regional_indicator_r: :regional_indicator_a: "
+            append rep ":regional_indicator_w:"
+          }
+          *(sub) {
+            set rep ":regional_indicator_s: :regional_indicator_u: "
+            append rep ":regional_indicator_b:"
+          }
+          *(preview) {
+            set rep ":regional_indicator_p: :regional_indicator_r: "
+            append rep ":regional_indicator_e: :regional_indicator_v:"
+          }
           default {set rep {\1}}
         }
         regsub -nocase {\((?:raw|sub|preview)\)} $title $rep title
@@ -378,7 +390,8 @@ proc custom::checksite {} {
             set token [::http::geturl $link]
             set body [::http::data $token]
             ::http::cleanup $token
-            if {[regexp -- {<strong>Category:</strong> <a href="([^\"]+)"} $body - category]} {
+            set re {<strong>Category:</strong> <a href="([^\"]+)"}
+            if {[regexp -- $re $body - category]} {
               set token [::http::geturl $category]
               set body [::http::data $token]
               ::http::cleanup $token
@@ -387,30 +400,34 @@ proc custom::checksite {} {
               } else {
                 set re {<img class="[^\"]+" style="[^\"]+" src="([^\"]+)"}
               }
-              regexp -- $re $body - image
-              set image "$scrapper(site)$image"
-              set imgFound 1
+              if {[regexp -- $re $body - image]} {
+                set image "$scrapper(site)$image"
+                set imgFound 1
+              }
             }
           }
           if {[string first $arr(animeName) $ep] > -1} {
-            if {$arr(custom) ne "" && [regexp {(.+) > (.+)} $arr(custom) - f t]} {
+            set re {(.+) > (.+)}
+            if {$arr(custom) ne "" && [regexp $re $arr(custom) - f t]} {
               regsub $f $link $t link
             }
             if {$imgFound} {
               coroutine ::meta::putdcPM[::id] ::meta::putdcPM $arr(userId) \
                 [dict create embed [dict create \
-                   url $link \
-                   type link \
-                   title [encoding convertto utf-8 [::htmlparse::mapEscapes $title]] \
-                   image [dict create url $image] \
-                ]]
+                  url $link \
+                  type link \
+                  title [encoding convertto utf-8 \
+                    [::htmlparse::mapEscapes $title]] \
+                  image [dict create url $image] \
+                ]] 0
             } else {
               coroutine ::meta::putdcPM[::id] ::meta::putdcPM $arr(userId) \
                 [dict create embed [dict create \
-                   url $link \
-                   type link \
-                   title [encoding convertto utf-8 [::htmlparse::mapEscapes $title]] \
-                ]]
+                  url $link \
+                  type link \
+                  title [encoding convertto utf-8 \
+                    [::htmlparse::mapEscapes $title]] \
+                ]] 0
             }
           }
         }
@@ -454,7 +471,9 @@ proc custom::subscribe {animeName} {
     if {$format eq "" && $cFormat eq ""} {
       set msg "You already are subscribed for $name!"
     } else {
-      customdb eval {UPDATE animefavs SET custom = :format WHERE animeName = :name}
+      customdb eval {
+        UPDATE animefavs SET custom = :format WHERE animeName = :name
+      }
       set msg "Your subscription for $name has been updated!"
     }
   } else {
@@ -552,11 +571,13 @@ proc custom::whois {text} {
     set datecreated [clock format [expr {
       [getSnowflakeUnixTime $id $::discord::Epoch]/1000
     }] -format "%a %d %b %Y %T UTC" -timezone UTC]
+    set desc "$text is $username\nCreated on $datecreated\nRole(s): $roles\n"
+    set footer "$username is a member of the server since $joined_at"
     ::meta::putdc [dict create embed \
       [dict create \
         title $type \
-        description "$text is $username\nCreated on $datecreated\nRole(s): $roles\n" \
-        footer [dict create text "$username is a member of the server since $joined_at"] \
+        description  $desc \
+        footer [dict create text $footer] \
         thumbnail [dict create url $avatar] \
       ] \
     ] 0
@@ -576,8 +597,8 @@ proc custom::checknews {} {
   }
   set file [::http::data $token]
   ::http::cleanup $token
-  
-  set posts [regexp -inline -all -- {<div class="post">((?:<div(?:(?!</div>).)+</div>|(?!</div>).)+)</div>} $file]
+  set re {<div class="post">((?:<div(?:(?!</div>).)+</div>|(?!</div>).)+)</div>}
+  set posts [regexp -inline -all -- $re $file]
   
   if {$posts == ""} {
     after [expr {$scrapper(delay)*60*1000}] ::custom::checknews
@@ -590,14 +611,14 @@ proc custom::checknews {} {
   set first [customdb eval {SELECT 1 FROM serebii LIMIT 1}]
   foreach {m post} $posts {
     regexp -- {<a href[^>]* id="([^\"]+)"[^>]*>} $post - id
-    set matches [regexp -inline -all -- {<p class="title"[^>]*?>([^<]*?)</p>\s*?<p>(.*?)</p>} $post]
+    set re {<p class="title"[^>]*?>([^<]*?)</p>\s*?<p>(.*?)</p>}
+    set matches [regexp -inline -all -- $re $post]
     set articles [dict create]
     foreach {m title text} $matches {
       if {[dict exists $articles $title]} {
-        dict set articles $title "[dict get $articles $title]\n\n$text"
-      } else {
-        dict set articles $title $text
+        set text "[dict get $articles $title]\n\n$text"
       }
+      dict set articles $title [::htmlparse::mapEscapes $text]
     }
     set current 0
     dict for {title text} $articles {
@@ -611,14 +632,16 @@ proc custom::checknews {} {
           set pos [lsearch -index 1 $lnews $id]
           if {$pos > -1} {
             lset lnews 0 3 [list {*}[lindex $lnews 0 3] [list \
-              name [encoding convertto utf-8 $title] \
-              value [encoding convertto utf-8 [htmlCleanup $text]] \
+              name [::htmlparse::mapEscapes [encoding convertto utf-8 $title]] \
+              value [::htmlparse::mapEscapes [encoding convertto utf-8 \
+                [htmlCleanup $text]]] \
             ]]
           } else {
             lappend lnews [dict create \
               title $id fields [list [dict create \
-              name [encoding convertto utf-8 $title] \
-              value [encoding convertto utf-8 [htmlCleanup $text]] \
+              name [::htmlparse::mapEscapes [encoding convertto utf-8 $title]] \
+              value [::htmlparse::mapEscapes [encoding convertto utf-8 \
+                [htmlCleanup $text]]] \
             ]]]
           }
           if {"::custom::newsUpdate $id" ni $cmds} {
@@ -643,8 +666,10 @@ proc custom::checknews {} {
         set fields ""
         customdb eval {SELECT title, article FROM serebii WHERE id = :id} arr {
           lappend fields [dict create \
-            name [encoding convertto utf-8 $arr(title)] \
-            value [encoding convertto utf-8 [htmlCleanup $arr(article)]] \
+            name [::htmlparse::mapEscapes \
+              [encoding convertto utf-8 $arr(title)]] \
+            value [::htmlparse::mapEscapes [encoding convertto utf-8 \
+              [htmlCleanup $arr(article)]]] \
           ]
         }
         set pos [lsearch -index 1 $ledits $id]
@@ -736,7 +761,13 @@ proc custom::urlCleanup {text url} {
   return "\[$text\]($url)"
 }
 
-#after 100000 [list ::custom::checksite]
+proc custom::snowflake {text} {
+  ::meta::putdc [dict create content [clock format [expr {
+      [getSnowflakeUnixTime $text $::discord::Epoch]/1000
+    }] -format "%a %d %b %Y %T UTC" -timezone UTC]] 0
+}
+
+after 100000 [list ::custom::checksite]
 after 50000 [list ::custom::checknews]
 
 puts "custom.tcl loaded"

@@ -1,24 +1,49 @@
-##
-# Pokedex Mode
-##
+# pokedex.tcl --
+#
+#       This file implements the Tcl code for querying the Pokedex database
+#
+# Copyright (c) 2018, Jerry Yong
+#
+# See the file "LICENSE" for information on usage and redistribution of this
+# file.
+
+package require sqlite3
+
+if {![namespace exists meta]} {
+  puts "Failed to load pokedex.tcl: Requires meta.tcl to be loaded."
+  return
+}
+
+if {![file exists "pokedexdb"]} {
+  puts "Failed to load pokedex.tcl: Requires pokedexdb to be loaded."
+  return
+}
+  
 namespace eval pokedex {
-  variable pokedex
   set pokedex(ver)      "0.3"
   set pokedex(usage)    "Usage: !pokedex ?next|search? \[pokemon\]"
   set pokedex(logo)     "**-Pok\u00E9dex-**"
   set pokedex(gen)      6
   set pokedex(restrict) [list]
   
-  variable ability
   set ability(ver)      "0.1"
-  set ability(usage)    "Usage: !ability \[ability\]"
+  set ability(usage)    "Usage: !ability ?search? \[ability\]"
   set ability(logo)     "**-Abilitydex-**"
-  set ability(error)    ""
+  
+  set move(ver)         "0.1"
+  set move(usage)       "Usage: !move ?search? \[move\]"
+  set move(logo)        "**-Modedex-**"
+  
+  set item(ver)         "0.1"
+  set item(usage)       "Usage: !item ?search? \[move\]"
+  set item(logo)        "**-Itemdex-**"
   
   sqlite3 dex pokedexdb
 }
 
-### Procedures
+##
+# Pokedex
+##
 proc pokedex::command {} {
   upvar data data text text channelId channelId guildId guildId userId userId
   switch [lindex $text 0] {
@@ -108,8 +133,8 @@ proc pokedex::get_pokemon {state arg} {
   # 1 - results obtained
   set mode 0
   set table pokeDetails$pokedex(gen)
-  set result [dex eval "\
-    SELECT * FROM $table WHERE lower(formname) = lower('$arg') \
+  set result [dex eval "
+    SELECT * FROM $table WHERE lower(formname) = lower('$arg') OR id = '$arg'
   "]
   if {[llength $result] > 0} {
     set mode 1
@@ -123,9 +148,11 @@ proc pokedex::get_pokemon {state arg} {
       if {$hability ne ""} {append ability "/*$hability*"}
       set total [expr {$hp+$atk+$def+$spatk+$spdef+$spd}]
       
+      set msg "**Type:** $type\n**Abilities:** $ability\n**Stats (HP/Atk/Def"
+      append msg "/SpA/SpD/Spd):** $hp/$atk/$def/$spatk/$spdef/$spd "
+      append msg "(Total: $total)"
       return [list $mode [dict create embed [dict create \
-        title "$id: $formname" \
-        description "**Type:** $type\n**Abilities:** $ability\n**Stats (HP/Atk/Def/SpA/SpD/Spd):** $hp/$atk/$def/$spatk/$spdef/$spd (Total: $total)" \
+        title "$id: $formname" description $msg \
       ]]]
     } elseif {$state eq "next"} {
       set quart ""
@@ -146,9 +173,13 @@ proc pokedex::get_pokemon {state arg} {
         "Fast then very slow" "Medium slow" "Fast" "Slow"} $exp]
       set texp [lindex {"1,000,000" "600,000" "1,640,000" "1,059,860" \
         "800,000" "1,250,000"} $exp]
+      set msg "**Egg Group:** $egggroup\n**EV yield (HP/Atk/Def/SpA/SpD/Spd):**"
+      append msg " $hp/$atk/$def/$satk/$sdef/$spd\n**Biometrics:** $height m, "
+      append msg "$weight kg\n**Catch rate:** $capture\n**Base Happiness:** "
+      append msg "$happiness\n**Gender ratio (M/F):** $gender\n**Exp yield:** "
+      append msg "$base_exp\n**Growth Rate:** $grw\n**Max Exp:** $texp"
       return [list $mode [dict create embed [dict create \
-        title "**$id:** $formname ($genus Pokémon)" \
-        description "**Egg Group:** $egggroup\n**EV yield (HP/Atk/Def/SpA/SpD/Spd):** $hp/$atk/$def/$satk/$sdef/$spd\n**Biometrics:** $height m, $weight kg\n**Catch rate:** $capture\n**Base Happiness:** $happiness\n**Gender ratio (M/F):** $gender\n**Exp yield:** $base_exp\n**Growth Rate:** $grw\n**Max Exp:** $texp" \
+        title "**$id:** $formname ($genus Pokémon)" description $msg \
       ]]]
     }
   } else {
@@ -165,19 +196,19 @@ proc pokedex::search {arg} {
   set mode 0
   set table "pokeDetails$pokedex(gen)"
   set fields {
-    id pokemon formname type genus ability ability2 hability gender egggroup 
+    id pokemon formname type genus ability1 ability2 hability gender egggroup 
     height weight legend evolve_cond hp atk def spatk spdef spd capture final 
     stage effort hatch_counter happiness exp forms colour base_exp pre_evos
   }
-  set query [dex eval "SELECT * FROM $table"]
+  
   set result ""
-  foreach $fields $query {
-    if {[regexp -nocase -- $arg [join [lmap x $fields {set $x}] " "]]} {
-      lappend result $formname
+  dex eval "SELECT * FROM $table" arr {
+    if {[regexp -nocase -- $arg [join [lmap x $fields {set arr($x)}] " "]]} {
+      lappend results $arr(formname)
       set mode 2
-    } elseif {$pokemon == "Bulbasaur"} {
     }
   }
+  
   if {!$mode} {
     return [list $mode [dict create content "No matched results found"]]
   } else {
@@ -188,9 +219,9 @@ proc pokedex::search {arg} {
 proc pokedex::random {number args} {
   variable pokedex
   if {$number == ""} {set number 1}
-  puts $number
   if {!($number > 0 && $number < 13)} {
-    return [list 0 "The maximum random number of Pokémon that can be picked is 12"]
+    return [list 0 \
+      "The maximum random number of Pokémon that can be picked is 12"]
   }
   set condition [list]
   
@@ -208,17 +239,24 @@ proc pokedex::random {number args} {
             uno* {lappend conds "(id >= '#495' AND id < '#650')"}
             kal* {lappend conds "(id >= '#650' AND id < '#722')"}
             alo* {lappend conds "(id >= '#722' AND id < '#999')"}
-            default {return [list 0 "Invalid region parameter. Must be in the format \"Kanto\" or \"Kanto|Johto|etc\""]}
+            default {
+              set msg {Invalid region parameter. Must be in the format "Kanto" }
+              append msg {or "Kanto|Johto|etc"}
+              return [list 0 $msg]}
           }
         }
         lappend condition "([join $conds { OR }])"
       }
       -final {
-        if {$param ni {0 1}} {return [list 0 "Invalid stage parameter. Must be 0 or 1"]}
+        if {$param ni {0 1}} {
+          return [list 0 "Invalid stage parameter. Must be 0 or 1"]
+        }
         lappend condition "final = $param"
       }
       -legend* {
-        if {$param ni {0 1}} {return [list 0 "Invalid legendary parameter. Must be 0 or 1"]}
+        if {$param ni {0 1}} {
+          return [list 0 "Invalid legendary parameter. Must be 0 or 1"]
+        }
         lappend condition "legend = $param"
       }
     }
@@ -249,8 +287,11 @@ proc pokedex::random {number args} {
 
 proc pokedex::query {query} {
   variable pokedex
-  if {[regexp -all -nocase -- {\y(?:ALTER|UPDATE|INTO|CREATE|INSERT)\y} $query]} {
-    return [list 0 [dict create content "Data manipulation queries are not supported"]]
+  if {
+    [regexp -all -nocase -- {\y(?:ALTER|UPDATE|INTO|CREATE|INSERT)\y} $query]
+  } {
+    return [list 0 \
+      [dict create content "Data manipulation queries are not supported"]]
   }
   if {[catch {dex eval $query} res]} {
     return [list 0 [dict create content $res]]
@@ -289,395 +330,181 @@ proc pokedex::query {query} {
 }
 
 ##
-# Abilitydex Mode
+# Abilitydex 
 ##
-
-### Procedures
 proc pokedex::ability {arg} {
-  variable pokedex
-  variable ability
-
   set args [split $arg]
   switch [lindex $args 0] {
       search {
       set arg [lindex $args 1]
-      ::meta::putdc [search_ability $arg]
+      ::meta::putdc [search_ability $arg] 1
     }
     default {
-      ::meta::putdc [get_ability $arg]
+      ::meta::putdc [get_ability $arg] 1
     }
   }
 }
 
-proc pokedex::get_ability { arg } {
-  variable ability
-  if {[llength $arg] < 1} {
-    return $ability(usage)
-  } 
+proc pokedex::get_ability {arg} {
+  variable ability pokedex
+  
+  if {[llength $arg] < 1} {return $ability(usage)} 
   set value 0
   set ability [string tolower $arg]
-  set data [open $abilityfile r]
-  while { [gets $data line] != -1 } {
-    if {([string tolower [lindex [split $line "@"] 0]] == $ability)} {
-      set ability [lindex [split $line "@"] 0]
-      set description [lindex [split $line "@"] 1]
-      set value 1
-      break
-    }
-  }
-  close $data
-  if {!$value} {return [format $ability(error) "No matched results found"]}
-  return "**$ability(logo)**: $description"
-}
-
-proc pokedex::search_ability {nick host hand chan arg} {
-  variable ability
-  if {$chan == ""} {set chan $nick}
-  set value 0
-  set result ""
-  set data [open $abilityfile r]
-  while { [gets $data line] != -1 } {
-    if {[regexp -all -nocase -- $arg $line]} {
-      lappend result [lindex [split $line "@"] 0]
-      set value 1
-    }
-  }
-  close $data
-  if {!$value} {return [format $ability(error) "No matched results found."]}
-    if {[llength $result] >= 120} {
-    set result1 [join [lrange $result 0 39] ", "]
-    set result2 [join [lrange $result 40 79] ", "]
-    set result3 [join [lrange $result 80 119] ", "]
-    set result4 [join [lrange $result 120 159] ", "]
-    putquick "PRIVMSG $chan :$ability(logo) Results: $result1,"
-    putquick "PRIVMSG $chan :$result2,"
-    putquick "PRIVMSG $chan :$result3,"
-    putquick "PRIVMSG $chan :$result4"
-  } elseif {[llength $result] >= 80} {
-    set result1 [join [lrange $result 0 39] ", "]
-    set result2 [join [lrange $result 40 79] ", "]
-    set result3 [join [lrange $result 80 119] ", "]
-    putquick "PRIVMSG $chan :$abilitylogo Results: $result1,"
-    putquick "PRIVMSG $chan :$result2,"
-    putquick "PRIVMSG $chan :$result3"
-  } elseif {[llength $result] >= 40} {
-    set result1 [join [lrange $result 0 39] ", "]
-    set result2 [join [lrange $result 40 79] ", "]
-    putquick "PRIVMSG $chan :$abilitylogo Results: $result1,"
-    putquick "PRIVMSG $chan :$result2"
+  set table "abilDetails$pokedex(gen)"
+  
+  lassign [dex eval {SELECT id FROM abilities WHERE english = :arg LIMIT 1}] \
+    id ability
+  
+  if {$id == ""} {return [dict create content "No matched results found"]}
+  
+  set results [dex eval "SELECT * FROM $table WHERE id = :id LIMIT 1"]
+  
+  if {$results != ""} {
+    lassign $results id - description
+    return [dict create embed [dict create \
+      title "$id: $ability" \
+      description "$description" \
+    ]]
   } else {
-    set result [join $result ", "]
-    putquick "PRIVMSG $chan :$abilitylogo Results: $result"
+    return [return [dict create content "No matched results found"]]
+  }
+}
+
+proc pokedex::search_ability {arg} {
+  variable ability pokedex
+  
+  set table "abilDetails$pokedex(gen)"
+  set results ""
+  
+  dex eval "
+    SELECT A.id, B.english, A.description FROM $table A
+    JOIN abilities B ON A.id = B.id
+  " arr {
+    if {
+      [regexp -nocase -- $arg \
+        [join [list $arr(id) $arr(english) $arr(description)] " "]]
+    } {
+      lappend results $arr(english)
+    }
+  }
+  
+  if {$results == ""} {
+    return [dict create content "No matched results found"]
+  } else {
+    return [dict create content "$ability(logo) Results: [join $results {, }]"]
   }
 }
 
 ##
-# Moves, Berries and Items
+# Movedex
 ##
-### Settings
-set movesfile  "pokedex/Moves"
-set berryfile  "pokedex/Berries"
-set itemfile   "pokedex/Items"
-set searchlist ""
-
-### Procedures
-
-proc pokedex::move {nick host hand chan arg} {
-  global movesfile searchlist pokedex
-  if {$chan in $pokedex(restrict)} {return}
+proc pokedex::move {arg} {
   set args [split $arg]
-
   switch [lindex $args 0] {
-
     search {
-      set file [open $movesfile r]
       set arg [lindex $args 1]
-      while {[gets $file line] != -1} {
-
-        if {[regexp -all -nocase -- $arg $line]} {
-
-          lappend searchlist [lindex [split $line "@"] 0]
-
-        }
-
-      }
-
-      close $file
-      if {$searchlist == ""} {
-
-        putquick "PRIVMSG $chan :Sorry, no matched results found."
-        return
-      }
-      if {[llength $searchlist] >= 120} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        set result4 [join [lrange $searchlist 120 159] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3,"
-        putquick "PRIVMSG $chan :$result4"
-      } elseif {[llength $searchlist] >= 80} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3"
-      } elseif {[llength $searchlist] >= 40} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2"
-      } else {
-        set result [join $searchlist ", "]
-        putquick "PRIVMSG $chan :Results: $result"
-      }
-      set searchlist ""
-
-      return  
-
-    } default {
-
-      do:movedesc $nick $host $hand $chan $arg
-
-    }
-  }
-
-  return
-}
-
-
-
-proc do:berry {nick host hand chan arg} {
-  global berryfile searchlist pokedex
-  if {$chan in $pokedex(restrict)} {return}
-  set args [split $arg]
-
-  switch [lindex $args 0] {
-
-    search {
-      set file [open $berryfile r]
+      ::meta::putdc [search_move $arg]
+    } next {
       set arg [lindex $args 1]
-      while {[gets $file line] != -1} {
-
-        if {[regexp -all -nocase -- $arg $line]} {
-
-          lappend searchlist [lindex [split $line "@"] 1]
-
-        }
-
-      }
-
-      close $file
-      if {$searchlist == ""} {
-
-        putquick "PRIVMSG $chan :Sorry, no matched results found."
-        return
-      }
-      if {[llength $searchlist] >= 120} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        set result4 [join [lrange $searchlist 120 159] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3,"
-        putquick "PRIVMSG $chan :$result4"
-      } elseif {[llength $searchlist] >= 80} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3"
-      } elseif {[llength $searchlist] >= 40} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2"
-      } else {
-        set result [join $searchlist ", "]
-        putquick "PRIVMSG $chan :Results: $result"
-      }
-      set searchlist ""
-
-      return  
-
+      ::meta::putdc [flags_move $arg]
     } default {
-
-      do:berrydesc $nick $host $hand $chan $arg
-
+      ::meta::putdc [get_move $arg]
     }
   }
-
-  return
-
 }
 
+proc pokedex::get_move {arg} {
+  variable move pokedex
+  
+  if {[llength $arg] < 1} {return $move(usage)} 
+  set value 0
+  set move [string tolower $arg]
+  set table "moveDetails$pokedex(gen)"
+  
+  lassign [dex eval {SELECT id FROM moves WHERE english = :arg LIMIT 1}] \
+    id move
+  
+  if {$id == ""} {return [dict create content "No matched results found"]}
+  
+  set results [dex eval "SELECT * FROM $table WHERE id = :id LIMIT 1"]
+  
+  if {$results != ""} {
+    lassign $results id type class pp basepower accuracy priority effectt
+    set msg "**Type:** $type\n**Class:** $class\nPP: $pp\n**Base Power:**"
+    append msg "$basepower\n**Accuracy:** $accuracy\n**Priority:** $priority\n"
+    append msg "**Description:** $effect"
+    return [dict create embed [dict create \
+      title "$id: $move" description $msg \
+    ]]
+  } else {
+    return [return [dict create content "No matched results found"]]
+  }
+}
 
-
-proc do:item {nick host hand chan arg} {
-  global itemfile searchlist pokedex
-  if {$chan in $pokedex(restrict)} {return}
-  set args [split $arg]
-
-  switch [lindex [split $arg] 0] {
-    search {
-
-      set file [open $itemfile r]
-      set arg [lindex $args 1]
-      while {[gets $file line] != -1} {
-
-        if {[regexp -all -nocase -- $arg $line]} {
-
-          lappend searchlist [lindex [split $line "@"] 0]
-
-        }
-
-      }
-
-      close $file
-      if {$searchlist == ""} {
-
-        putquick "PRIVMSG $chan :Sorry, no matched results found."
-        return
-      }
-      if {[llength $searchlist] >= 120} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        set result4 [join [lrange $searchlist 120 159] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3,"
-        putquick "PRIVMSG $chan :$result4"
-      } elseif {[llength $searchlist] >= 80} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        set result3 [join [lrange $searchlist 80 119] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2,"
-        putquick "PRIVMSG $chan :$result3"
-      } elseif {[llength $searchlist] >= 40} {
-        set result1 [join [lrange $searchlist 0 39] ", "]
-        set result2 [join [lrange $searchlist 40 79] ", "]
-        putquick "PRIVMSG $chan :Results: $result1,"
-        putquick "PRIVMSG $chan :$result2"
-      } else {
-        set result [join $searchlist ", "]
-        putquick "PRIVMSG $chan :Results: $result"
-      }
-      set searchlist ""
-
-      return  
-    } default {
-
-      do:itemdesc $nick $host $hand $chan $arg
-
+proc pokedex::search_move {arg} {
+  variable move pokedex
+  
+  set table "moveDetails$pokedex(gen)"
+  set results ""
+  
+  dex eval "
+    SELECT A.id, B.english, A.description FROM $table A
+    JOIN moves B ON A.id = B.id
+  " arr {
+    if {
+      [regexp -nocase -- $arg \
+        [join [list $arr(id) $arr(english) $arr(description)] " "]]
+    } {
+      lappend results $arr(english)
     }
   }
-
-  return
-
+  
+  if {$results == ""} {
+    return [dict create content "No matched results found"]
+  } else {
+    return [dict create content "$move(logo) Results: [join $results {, }]"]
+  }
 }
 
-
-
-proc do:movedesc {nick host hand chan arg} {
-  global movesfile pokedex
-  if {$chan in $pokedex(restrict)} {return}
-  set result 0
-  set file [open $movesfile r]
-  while {[gets $file line] != -1} {
-    if {[string tolower [lindex [split $line "@"] 0]] == [string tolower $arg]} {
-      set move [lindex [split $line "@"] 0]
-      set category [lindex [split $line "@"] 1]
-      set PP [lindex [split $line "@"] 2]
-      set power [lindex [split $line "@"] 3]
-      set accuracy [lindex [split $line "@"] 4]
-      set desc [lindex [split $line "@"] 5]
-      set type [lindex [split $line "@"] 6]
-      set result 1
-      break
-    }
+proc pokedex::flags_move {arg} {
+  variable move pokedex
+  
+  if {[llength $arg] < 1} {return $move(usage)} 
+  set value 0
+  set move [string tolower $arg]
+  set table "moveDetails$pokedex(gen)"
+  
+  lassign [dex eval {SELECT id FROM moves WHERE english = :arg LIMIT 1}] \
+    id move
+  
+  if {$id == ""} {return [dict create content "No matched results found"]}
+  
+  set results [dex eval "SELECT * FROM $table WHERE id = :id LIMIT 1"]
+  
+  if {$results != ""} {
+    lassign $results id - - - - - - - contact charging recharge detectprotect \
+      reflectable snatchable mirrormove punchbased sound gravity defrosts \
+      range heal infiltrate
+    set msg "**Contact:** $contact\n**Requires a charging turn:** $charging\n"
+    append msg "**Requires recharge:** $recharge\n"
+    append msg "**Bypasses Detect/Protect:** $detectprotect\n"
+    append msg "**Reflectable:** $reflectable\n**Snatchable:** $snatchable"
+    append msg "**Copied by Mirror Move:** $mirrormove\n"
+    append msg "**Punch based:** $punchbased\n**Sound based:** $sound\n"
+    append msg "**Nullified by *Gravity*:** $gravity\n"
+    append msg "**Defrosts the user:** $defrosts\n"
+    append msg "**Can hit/affect furthest Pokemon in triple battles:** $range\n"
+    append msg "**Heals:** $heal\n**Bypasses *Substitute*:** $infiltrate"
+    return [dict create embed [dict create \
+      title "$id: $move" description $msg \
+    ]]
+  } else {
+    return [return [dict create content "No matched results found"]]
   }
-
-  close $file
-  if {!$result} {
-    putquick "PRIVMSG $chan :Sorry, no matched results found."
-    return
-  }
-  putquick "PRIVMSG $chan :\002\00303-Movedex-\003\002 Move: \002$move\002 \[\00303Type: $type\003, \00305Cat: $category\003, \00302PP: $PP\003, Pow: $power, \00306Acc: $accuracy\003\] $desc"
-
-  return
-
-}
-
-
-
-proc do:berrydesc {nick host hand chan arg} {
-  global berryfile pokedex
-  if {$chan in $pokedex(restrict)} {return}
-  set file [open $berryfile r]
-  set result 0
-  while {[gets $file line] != -1} {
-    if {[string tolower [lindex [split $line "@"] 1]] == [string tolower $arg]} {
-      set number [lindex [split $line "@"] 0]
-      set berry [lindex [split $line "@"] 1]
-      set desc [lindex [split $line "@"] 2]
-      set result 1
-      break
-    }
-  }
-  close $file
-  if {!$result} {
-    putquick "PRIVMSG $chan :Sorry, no matched results found."
-    return
-  }
-  putquick "PRIVMSG $chan :\002\00303-Berrydex-\003\002 $number: \002$berry\002 ~$desc."
-  return
-
-}
-
-
-
-proc do:itemdesc {nick host hand chan arg} {
-  global itemfile pokedex
-  if {$chan in $pokedex(restrict)} {return}
-  set file [open $itemfile r]
-  set result 0
-  while {[gets $file line] != -1} {
-    if {[string tolower [lindex [split $line "@"] 0]] == [string tolower $arg]} {
-      set item [lindex [split $line "@"] 0]
-      set desc [lindex [split $line "@"] 1]
-      set result 1
-      break
-    }
-  }
-
-  close $file
-  if {!$result} {
-    putquick "PRIVMSG $chan :Sorry, no matched results found."
-    return
-  }
-  putquick "PRIVMSG $chan :\002\00303-Itemdex-\003\002 \002$item\002 ~$desc."
-
-  return
-
-}
-
-proc priv:move {nick host hand arg} {
-  do:move $nick $host $hand $nick $arg
-}
-
-proc priv:berry {nick host hand arg} {
-  do:berry $nick $host $hand $nick $arg
-}
-
-proc priv:item {nick host hand arg} {
-  do:item $nick $host $hand $nick $arg
 }
 
 ### Loaded
-puts "Pokedex $::pokedex::pokedex(ver), Abilitydesc $::pokedex::ability(ver) loaded"
+puts "Pokedex $::pokedex::pokedex(ver)"
+puts "Abilitydex $::pokedex::ability(ver) loaded"
+puts "Movedex $::pokedex::move(ver) loaded"

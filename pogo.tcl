@@ -1,5 +1,5 @@
 namespace eval pogo {
-  set silph(site)    "https://sil.ph/"
+  set silph(site)   "https://sil.ph/"
   set silph(listen) [list]
   
   sqlite3 pogodb pogo.sqlite3
@@ -66,7 +66,9 @@ proc pogo::setsilph {username} {
 proc pogo::showcard {text} {
   variable silph
   upvar guildId guildId userId userId channelId channelId
-  set members [dict get [set ${::session}::guilds] $guildId members]
+  set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+  set guildData {*}$guildData
+  set members [dict get $guildData members]
   if {[regexp {^<@!?([0-9]+)>$} $text - user]} {
     set data [lsearch -inline $members "*$user*"]
   } elseif {[string tolower $text] in {me {}}} {

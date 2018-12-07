@@ -44,6 +44,7 @@ namespace eval stats {
   # 500 kicks
   # 501 kicked
   # 600 nickChange
+  # 601 nameChange
   
   statsdb eval {
     CREATE TABLE IF NOT EXISTS stats(
@@ -72,38 +73,40 @@ namespace eval stats {
   }
   
   # some global emotes
-  statsdb eval {
-    INSERT INTO statsMood VALUES
-    ('', ':)', 1),
-    ('', ':(', 0),
-    ('', '(:', 1),
-    ('', '):', 0),
-    ('', ':-)', 1),
-    ('', ':-(', 0),
-    ('', '(-:', 1),
-    ('', ')-:', 0),
-    ('', ':]', 1),
-    ('', ':[', 0),
-    ('', '[:', 1),
-    ('', ']:', 0),
-    ('', ':-]', 1),
-    ('', ':-[', 0),
-    ('', '[-:', 1),
-    ('', ']-:', 0),
-    ('', ':D', 1),
-    ('', 'xD', 1),
-    ('', 'XD', 1),
-    ('', ':3', 1),
-    ('', 'n_n', 1),
-    ('', '^^', 1),
-    ('', '^_^', 1),
-    ('', 'owo', 1),
-    ('', 'ouo', 1),
-    ('', 'c:', 1),
-    ('', 'D:', 0),
-    ('', 'Dx', 0),
-    ('', 'DX', 0),
-    ('', ':c', 0)
+  if {![statsdb exists {SELECT 1 FROM statsMood}]} {
+    statsdb eval {
+      INSERT INTO statsMood VALUES
+      ('', ':)', 1),
+      ('', ':(', 0),
+      ('', '(:', 1),
+      ('', '):', 0),
+      ('', ':-)', 1),
+      ('', ':-(', 0),
+      ('', '(-:', 1),
+      ('', ')-:', 0),
+      ('', ':]', 1),
+      ('', ':[', 0),
+      ('', '[:', 1),
+      ('', ']:', 0),
+      ('', ':-]', 1),
+      ('', ':-[', 0),
+      ('', '[-:', 1),
+      ('', ']-:', 0),
+      ('', ':D', 1),
+      ('', 'xD', 1),
+      ('', 'XD', 1),
+      ('', ':3', 1),
+      ('', 'n_n', 1),
+      ('', '^^', 1),
+      ('', '^_^', 1),
+      ('', 'owo', 1),
+      ('', 'ouo', 1),
+      ('', 'c:', 1),
+      ('', 'D:', 0),
+      ('', 'Dx', 0),
+      ('', 'DX', 0),
+      ('', ':c', 0)
+    }
   }
 
   # time on server is EDT, need to use UTC
@@ -117,19 +120,18 @@ proc stats::command {} {
       switch [lindex $text 1] {
         "delete" -
         "clear" {
-          if {
-            ![::meta::hasPerm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] || 
-            $userId != $::ownerId
-          } {
+          set roles {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}
+          if {![::meta::hasPerm $userId $roles] || $userId != $::ownerId} {
             return 1
           }
-          clearServstats $guildId [regsub "!s(?:tat)?s [lindex $text 1] *" $text ""]
+          clear_servstats $guildId \
+            [regsub "!s(?:tat)?s [lindex $text 1] *" $text ""]
         }
         "reg" {
-          regStats $guildId [regsub {!s(?:tat)?s reg *} $text ""]
+          reg_stats $guildId [regsub {!s(?:tat)?s reg *} $text ""]
         }
         "" {
-          putServstats $guildId [regsub {!s(?:tat)?s *} $text ""]
+          put_servstats $guildId [regsub {!s(?:tat)?s *} $text ""]
         }
         default {
           ::meta::putdc [dict create content \
@@ -142,7 +144,7 @@ proc stats::command {} {
   return 1
 }
 
-proc stats::putServstats {guildId {channelId {}}} {
+proc stats::put_servstats {guildId {channelId {}}} {
   if {$channelId == ""} {
     set stats [statsdb eval {SELECT * FROM stats WHERE guildId = :guildId}]
     set loc "the server"
@@ -152,20 +154,24 @@ proc stats::putServstats {guildId {channelId {}}} {
   }
   if {[llength $stats] > 0} {
     set desc ""
-    set guildName [dict get [set ${::session}::guilds] $guildId name]
-    set date [statsdb eval {SELECT date FROM statsFrom WHERE guildId = :guildId}]
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set guildName [dict get $guildData name]
+    set date [statsdb eval {
+      SELECT date FROM statsFrom WHERE guildId = :guildId
+    }]
     if {$channelId == ""} {
       set lines [statsdb eval {
-        SELECT SUM(value) FROM stats WHERE guildId = :guildId AND type < 125
+        SELECT SUM(value) FROM stats WHERE guildId = :guildId AND action < 125
       }]
       set words [statsdb eval {
-        SELECT SUM(value) FROM stats WHERE guildId = :guildId AND type = 200
+        SELECT SUM(value) FROM stats WHERE guildId = :guildId AND action = 200
       }]
       set toplines [statsdb eval {
         SELECT userId, SUM(value) FROM stats 
-        WHERE guildId = :guildId AND type < 125
+        WHERE guildId = :guildId AND action < 125
         GROUP BY userId ORDER BY SUM(value) DESC LIMIT 1
-      }
+      }]
       lassign $toplines topliner toplines
       lassign [topGuild $guildId 200] topworder topwords
       lassign [topContainGuild $guildId 140] questioner qperc
@@ -181,16 +187,18 @@ proc stats::putServstats {guildId {channelId {}}} {
       lassign [topGuild $guildId 402] janitor janitored
     } else {
       set lines [statsdb eval {
-        SELECT SUM(value) FROM stats WHERE channelId = :channelId AND type < 125
+        SELECT SUM(value) FROM stats
+        WHERE channelId = :channelId AND action < 125
       }]
       set words [statsdb eval {
-        SELECT SUM(value) FROM stats WHERE channelId = :channelId AND type = 200
+        SELECT SUM(value) FROM stats
+        WHERE channelId = :channelId AND action = 200
       }]
       set toplines [statsdb eval {
         SELECT userId, SUM(value) FROM stats 
-        WHERE channelId = :channelId AND type < 125
+        WHERE channelId = :channelId AND action < 125
         GROUP BY userId ORDER BY SUM(value) DESC LIMIT 1
-      }
+      }]
       lassign $toplines topliner toplines
       lassign [topChannel $channelId 200] topworder topwords
       lassign [topContainChannel $channelId 140] questioner qperc
@@ -221,7 +229,8 @@ proc stats::putServstats {guildId {channelId {}}} {
     set msg [dict create embed [dict create \
       title "Stats for $guildName:"
       description $desc
-      footer [dict create text "Stats collected as from [clock format $date -timezone UTC]"]
+      footer [dict create text \
+        "Stats collected as from [clock format $date -timezone UTC]"]
     ]
   } else {
     set msg "There are no stats saved for $loc!"
@@ -229,7 +238,7 @@ proc stats::putServstats {guildId {channelId {}}} {
   ::meta::putdc [dict create content $msg] 1
 }
 
-proc stats::clearServstats {guildId {channelId {}}} {
+proc stats::clear_servstats {guildId {channelId {}}} {
   if {$channelId == ""} {
     set stats [statsdb eval {SELECT * FROM stats WHERE guildId = :guildId}]
     if {[llength $stats] > 0} {
@@ -267,25 +276,25 @@ proc stats::bump {type guildId channelId userId content} {
         [::getSnowflakeUnixTime 448756188566388756 $::discord::Epoch]/1000
       }] -timezone UTC -format "%H"]
       set hr "1$hr"
-      bumpAction $guildId $channelId $userId $hr
+      bump_action $guildId $channelId $userId $hr
       
       # All caps
       if {[string toupper $content] eq $content} {
-        bumpAction $guildId $channelId $userId 130
+        bump_action $guildId $channelId $userId 130
       
       # Yelling
       } elseif {[regexp {^.+\y[A-Z]{2,}\y} $content]} {
-        bumpAction $guildId $channelId $userId 201
+        bump_action $guildId $channelId $userId 201
       }
       
       # Questions
       if {[string first "?" $content] != -1} {
-        bumpAction $guildId $channelId $userId 140
+        bump_action $guildId $channelId $userId 140
       }
       
       # Words
       set words [llength [split $content " "]]
-      bumpAction $guildId $channelId $userId 200 $words
+      bump_action $guildId $channelId $userId 200 $words
       
       # :)
       set smilies [statsdb eval {
@@ -301,7 +310,7 @@ proc stats::bump {type guildId channelId userId content} {
       }
       
       if {$smile} {
-        bumpAction $guildId $channelId $userId 202
+        bump_action $guildId $channelId $userId 202
       }
       
       # :(
@@ -318,36 +327,39 @@ proc stats::bump {type guildId channelId userId content} {
       }
       
       if {$frown} {
-        bumpAction $guildId $channelId $userId 203
+        bump_action $guildId $channelId $userId 203
       }
       
       # Letters
       set letters [llength [regexp -all {[[:alnum:]]} $content]]
-      bumpAction $guildId $channelId $userId 300 $letters
+      bump_action $guildId $channelId $userId 300 $letters
     }
     editMsg {
-      bumpAction $guildId $channelId $userId 400
+      bump_action $guildId $channelId $userId 400
     }
     deleteMsg {
       if {$content eq ""} {
-        bumpAction $guildId $channelId $userId 401
+        bump_action $guildId $channelId $userId 401
       } else {
-        bumpAction $guildId $channelId $userId 402
+        bump_action $guildId $channelId $userId 402
       }
+    }
+    userKick {
+      bump_action $guildId $channelId $userId 500
+      bump_action $guildId $channelId $content 501
     }
     nickChange {
       if {![::meta::hasPerm $userId {CHANGE_NICKNAME}]} {return}
-      bumpAction $guildId $channelId $userId 600
+      bump_action $guildId $channelId $userId 600
     }
-    userKick {
-      bumpAction $guildId $channelId $userId 500
-      bumpAction $guildId $channelId $content 100
+    nameChange {
+      bump_action $guildId $channelId $userId 601
     }
     default {}
   }
 }
 
-proc stats::regStats {guildId arg} {
+proc stats::reg_stats {guildId arg} {
   set arg [split $arg]
   if {[llength $arg] != 2} {
     ::meta::putdc [dict create content \
@@ -371,11 +383,11 @@ proc stats::regStats {guildId arg} {
   ] 1
 }
 
-proc stats::bumpAction {guildId channelId userId action {amt 1}} {
-  set recs {
+proc stats::bump_action {guildId channelId userId action {amt 1}} {
+  set recs [statsdb eval {
     SELECT 1 FROM stats
     WHERE guildId = :guildId AND userId = :userId AND action = :action LIMIT 1
-  }
+  }]
   if {$recs == ""} {
     statsdb eval {
       INSERT INTO stats VALUES (:guildId, :channelId, :userId, :action, 1)
@@ -388,7 +400,7 @@ proc stats::bumpAction {guildId channelId userId action {amt 1}} {
   }
 }
 
-proc stats::topGuild {guildId action} {
+proc stats::top_guild {guildId action} {
   return [statsdb eval {
     SELECT userId, value FROM stats 
     WHERE guildId = :guildId AND type = :action
@@ -396,7 +408,7 @@ proc stats::topGuild {guildId action} {
   }
 }
 
-proc stats::topContainGuild {guildId action} {
+proc stats::top_contain_guild {guildId action} {
   return [statsdb eval {
     SELECT a.userId, 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) FROM stats a
     JOIN stats b
@@ -408,7 +420,7 @@ proc stats::topContainGuild {guildId action} {
   }]
 }
 
-proc stats::topChannel {channelId action} {
+proc stats::top_channel {channelId action} {
   return [statsdb eval {
     SELECT userId, value FROM stats 
     WHERE channelId = :channelId AND type = :action
@@ -416,7 +428,7 @@ proc stats::topChannel {channelId action} {
   }
 }
 
-proc stats::topContainChannel {channelId action} {
+proc stats::top_contain_channel {channelId action} {
   return [statsdb eval {
     SELECT a.userId, 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) FROM stats a
     JOIN stats b
@@ -427,7 +439,5 @@ proc stats::topContainChannel {channelId action} {
     ORDER BY 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) DESC LIMIT 1
   }]
 }
-
-
 
 puts "stats.tcl loaded"
