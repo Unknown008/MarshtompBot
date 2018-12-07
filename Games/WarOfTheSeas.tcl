@@ -18,10 +18,12 @@ if {![namespace exists meta]} {
 namespace eval wots {
   sqlite3 wotsdb "${scriptDir}/wotsdb.sqlite3"
   
+  set root "https://github.com/Unknown008/MarshtompBot/blob/master/Games"
+  
   # Game Sessions
   set game(sessions)     [list]
   # Help
-  set game(help)         "https://pastebin.com/V4SDY0Ek"
+  set game(help)         "$root/WarOfTheSeas%20Help.md"
   set game(deck)         [list]
   set game(defaultChan)  "waroftheseas-spectator"
   set game(defaultCat)   "games"
@@ -113,6 +115,10 @@ proc wots::command {} {
     "!out" -
     "!drop" {drop_player $guildId $channelId $userId [lindex $text 1]}
     
+    "!wotshelp" {
+      set msg "Command usage can be found here: $game(help)"
+      ::meta::putdc [dict create content $msg] 0
+    }
     "!wotsset" {
       if {![::meta::hasPerm $userId {ADMINISTRATOR MANAGE_GUILD}]} {
         set msg "You need at least the \"Manage Guild\" permission to use this "
@@ -123,8 +129,12 @@ proc wots::command {} {
       settings $guildId $channelId $userId {*}[regsub {!wotsset } $text ""]
     }
     
-    "!pause" {pause $guildId $channelId $userId}
-    "!resume" {resume $guildId $channelId $userId}
+    "!wotspause" {
+      pause $guildId $channelId $userId
+    }
+    "!wotsresume" {
+      resume $guildId $channelId $userId
+    }
     
     "!cancel" -
     "!abort" -
@@ -165,8 +175,9 @@ proc wots::create_game {userId guildId} {
       "A game of War of the Seas is already running!"] 0
     return
   }
-  
-  set channels [dict get [set ${::session}::guilds] $guildId channels]
+  set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+  set guildData {*}$guildData
+  set channels [dict get $guildData channels]
   set catExists 0
   set chanExists 0
   set parentId ""
@@ -236,21 +247,9 @@ proc wots::create_game {userId guildId} {
     }
   }
   
-  set afterId [after $game(jointimeout) [list coroutine \
-    ::wots::check_game[::id] ::wots::check_game $guildId $channelId $userId]]
-  # Game modes
-  #  1 - Awaiting players
-  #  2 - Setting up channels
-  #  3 - Awaiting moves
-  #  4 - Defender ability
-  #  5 - Attacker ability
-  #  6 - Defender recon call
-  #  7 - Attacker recon call
-  #  8 - Battle resolve
-  
   dict set game(sessions) $guildId [dict create mode 1 chan $channelId players \
     [list [dict create player $userId chan {} hand {} inplay {} host 1]] \
-    pile [list] parent $parentId after $afterId playerlist [list $userId] \
+    pile [list] parent $parentId after "" playerlist [list $userId] \
     currentIdx "" targetId "" responses "" activated "" pause 0 listeners "" \
     pending "" \
   ]
@@ -259,6 +258,11 @@ proc wots::create_game {userId guildId} {
   append msg "join the game, you have [expr {$game(jointimeout)/1000}] seconds "
   append msg "to join. Up to 3 additional players can join the game."
   ::meta::putdc [dict create content $msg] 0 $channelId
+  
+  set afterId [after $game(jointimeout) [list coroutine \
+    ::wots::check_game[::id] ::wots::check_game $guildId $channelId $userId]]
+  
+  dict set game(sessions) $guildId after $afterId
 }
 
 proc wots::join_game {guildId channelId userId} {
@@ -321,7 +325,9 @@ proc wots::drop_player {guildId channelId userId {target ""} {silent 0}} {
   } elseif {$target == ""} {
     set targetId $userId
   } else {
-    set members [dict get [set ${::session}::guilds] $guildId members]
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set members [dict get $guildData members]
     set data [lsearch -inline -nocase $members "*$target*"]
     if {$data == ""} {
       ::meta::putdc [dict create content "No such user found."] 0
@@ -420,18 +426,8 @@ proc wots::start_game {guildId channelId userId} {
     if {$admins} {
       set channelId "DM"
     } else {
-      if {[catch {
-          dict get [set ${::session}::users] $playerId nick $guildId
-        } nick]
-      } {
-        set channame [dict get [set ${::session}::users] $playerId username]
-      } else {
-        if {$nick eq ""} {
-          set channame [dict get [set ${::session}::users] $playerId username]
-        } else {
-          set channame $nick
-        }
-      }
+      set channame \
+        [lindex [::meta::getUsernameNick $userId $guildId "%s %s"] end]
       
       set playerPerms [list {*}$permissions [dict create id $playerId \
         type "member" allow $channel_perms deny 0]]
@@ -497,7 +493,9 @@ proc wots::stop_game {guildId channelId userId {silent 0}} {
   set players [dict get $game(sessions) $guildId players]
   
   if {$userId != [dict get [lindex $players 0] player]} {
-    set presences [dict get [set ${::session}::guilds] $guildId presences]
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set presences [dict get $guildData presences]
     set idx [lsearch $presences "*$userId*"]
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can stop an ongoing game of War of the Seas, "
@@ -653,9 +651,11 @@ proc wots::select_target {guildId} {
   foreach player $players {
     set id [dict get $player player]
     if {$id == $playerId} {continue}
-    set name [dict get [set ${::session}::users] $id username]
-    set discriminator [dict get [set ${::session}::users] $id discriminator]
-    if {[catch {dict get [set ${::session}::users] $id nick $guildId} nick]} {
+    set userData [guild eval {SELECT data FROM users WHERE userId = :id}]
+    set userData {*}$userData
+    set name [dict get $userData username]
+    set discriminator [dict get $userData discriminator]
+    if {[catch {dict get $userData nick $guildId} nick]} {
       set nick ""
     }
     if {$nick == ""} {
@@ -1263,7 +1263,7 @@ proc wots::ask_recon {guildId userId userData targetId targetData} {
   
   set msg "Would you like to make a Recon Call? (Y/N)"
   set activated [dict get $game(sessions) $guildId activated]
-  if {$userId in $activated} {
+  if {$targetId in $activated} {
     append msg " (Note that your opponent has activated their card's ability "
     append msg "during this battle, so you will only be able to make a Value "
     append msg "Call)"
@@ -1568,7 +1568,9 @@ proc wots::pause {guildId channelId userId} {
   set players [dict get $game(sessions) $guildId players]
   
   if {$userId != [dict get [lindex $players 0] player]} {
-    set presences [dict get [set ${::session}::guilds] $guildId presences]
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set presences [dict get $guildData presences]
     set idx [lsearch $presences "*$userId*"]
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can pause an ongoing game of War of the Seas,"
@@ -1610,7 +1612,9 @@ proc wots::resume {guildId channelId userId} {
   set players [dict get $game(sessions) $guildId players]
   
   if {$userId != [dict get [lindex $players 0] player]} {
-    set presences [dict get [set ${::session}::guilds] $guildId presences]
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set presences [dict get $guildData presences]
     set idx [lsearch $presences "*$userId*"]
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can pause an ongoing game of War of the Seas,"
@@ -1834,7 +1838,11 @@ proc wots::ban_user {guildId channelId userId targets} {
         [dict create content "Error: User to ban was not mentioned."] 0
       return
     } else {
-      set members [dict get [set ${::session}::guilds] $guildId members]
+      set guildData [guild eval {
+        SELECT data FROM guild WHERE guildId = :guildId
+      }]
+      set guildData {*}$guildData
+      set members [dict get $guildData members]
       set data [lsearch -inline -nocase $members "*$target*"]
       if {$data == ""} {
         ::meta::putdc [dict create content "No such user found."] 0
@@ -1878,7 +1886,11 @@ proc wots::unban_user {guildId channelId userId targets} {
         "Error: User to ban was not mentioned."] 0
       return
     } else {
-      set members [dict get [set ${::session}::guilds] $guildId members]
+      set guildData [guild eval {
+        SELECT data FROM guild WHERE guildId = :guildId
+      }]
+      set guildData {*}$guildData
+      set members [dict get $guildData members]
       set data [lsearch -inline -nocase $members "*$target*"]
       if {$data == ""} {
         ::meta::putdc [dict create content "No such user found."] 0
