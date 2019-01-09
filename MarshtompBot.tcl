@@ -26,9 +26,9 @@ source "${scriptDir}/private.tcl"
 
 # https://discordapp.com/developers/applications/me
 # Prod
-# https://discordapp.com/oauth2/authorize?&client_id=204180397649559552&permissions=8&scope=bot
+# https://stillwaters.page.link/marshtomp-bot-invite
 # Dev
-# https://discordapp.com/oauth2/authorize?&client_id=204180300673187840&permissions=8&scope=bot
+# https://stillwaters.page.link/marshtomp-beta-bot-invite
 
 ###### Custom stuff here ######
 
