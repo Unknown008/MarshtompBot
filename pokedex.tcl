@@ -504,6 +504,29 @@ proc pokedex::flags_move {arg} {
   }
 }
 
+##
+# Itemdex 
+##
+proc pokedex::item {arg} {
+  ::meta::putdc [dict create content \
+    "Unfortunately, this function is not available yet."] 0
+  return
+  set args [split $arg]
+  switch [lindex $args 0] {
+      search {
+      set arg [lindex $args 1]
+      ::meta::putdc [search_item $arg] 1
+    }
+    default {
+      ::meta::putdc [get_item $arg] 1
+    }
+  }
+}
+
+proc pokedex::pre_rehash {} {
+  return
+}
+
 ### Loaded
 puts "Pokedex $::pokedex::pokedex(ver)"
 puts "Abilitydex $::pokedex::ability(ver) loaded"

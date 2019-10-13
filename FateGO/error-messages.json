@@ -1,0 +1,19 @@
+{
+    "addHelp": "Usage (all parameters must be provided; if the servant does not have skills unlocked, provide them at level 1):\n$fgo(cmd)servant add _servantName|servantId_ _servantLvl_ _servantAscension_ _servantSkill1Lvl_ _servantSkill2Lvl_ _servantSkill3Lvl_\nOr in any parameter order:\n$fgo(cmd)servant add **-name _servantName_|-id _servantId_** -level _servantLvl_ -ascension _servantAscension_ -skill1 _servantSkill1Lvl_ -skill2_servantSkill2Lvl_ -skill3 _servantSkill3Lvl_",
+    "addError": "Wrong number of parameters or invalid parameters. Usage (all parameters must be provided; if the servant does not have skills unlocked, provide them at level 1):\n$fgo(cmd)servant add _servantName|servantId_ _servantLvl_ _servantAscension_ _servantSkill1Lvl_ _servantSkill2Lvl_ _servantSkill3Lvl_\nOr in any parameter order:\n$fgo(cmd)servant add -name _servantName_|-id _servantId_ -level _servantLvl_ -ascension _servantAscension_ -skill1 _servantSkill1Lvl_ -skill2 _servantSkill2Lvl_ -skill3 _servantSkill3Lvl_",
+    "addUrlError": "Could not read from the website specified.",
+    "servantNameNotFound": "No servants named $param found. If you believe this servant exists, contact $::ownerTag or create an issue on $fgo(gitIssue).",
+    "servantIdNotFound": "No servants with ID $param found. If you believe this servant exists, contact $::ownerTag or create an issue on $fgo(gitIssue).",
+    "multipleServantFound": "More than one servant were matched. Please use the command again with the appropriate ID instead:\n[join $results \n]",
+    "servantidMissing" : "Servant ID or Name is missing",
+    "servantasMissing" : "Servant Ascension Level is missing",
+    "servantlvMissing" : "Servant Level is missing",
+    "servants1Missing" : "Servant Skill1 Level is missing",
+    "invalidLevel" : "The provided servant level is invalid. It should be a number ranging between 1 and 100 inclusive.",
+    "invalidAscension" : "The provided servant ascension level is invalid. It should be a number ranging between 0 and 4 inclusive.",
+    "invalidSkillLevel" : "The provided servant skill level is invalid. It should be a number ranging between 1 and 10 inclusive.",
+    "rarityFilter": "Invalid or missing star/rarity filter value. Should be a number between 1 and 5 inclusive. Can be preceded by `<=` or `>=` (e.g. `-star >=4`).",
+    "classFilter": "Invalid or missing class. Valid classes include [join $results {, }].",
+    "nameFilter": "Invalid or missing servant name.",
+    "levelFilter": "Invalid or missing servant level."
+}

@@ -121,11 +121,11 @@ proc stats::command {} {
         "delete" -
         "clear" {
           set roles {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}
-          if {![::meta::hasPerm $userId $roles] || $userId != $::ownerId} {
+          if {![::meta::has_perm $userId $roles] || $userId != $::ownerId} {
             return 1
           }
           clear_servstats $guildId \
-            [regsub "!s(?:tat)?s [lindex $text 1] *" $text ""]
+            [regsub {!s(?:tat)?s (?:delete|clear) *} $text ""]
         }
         "reg" {
           reg_stats $guildId [regsub {!s(?:tat)?s reg *} $text ""]
@@ -134,8 +134,16 @@ proc stats::command {} {
           put_servstats $guildId [regsub {!s(?:tat)?s *} $text ""]
         }
         default {
+          regexp {<#([0-9]+)>} [lindex $text 1] - chan
+          if {$chan != ""} {
+            set res [statsdb eval {SELECT 1 FROM stats WHERE channelId = :chan}]
+            if {$res != ""} {
+              put_servstats $guildId $chan
+              return 1
+            }
+          }
           ::meta::putdc [dict create content \
-            "Unknown option. Should be !stats ?\[clear|reg\]?"]
+            "Unknown option. Should be !stats ?\[clear|reg\]?"] 0
         }
       }
     }
@@ -157,6 +165,7 @@ proc stats::put_servstats {guildId {channelId {}}} {
     set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
     set guildData {*}$guildData
     set guildName [dict get $guildData name]
+    set channelName ""
     set date [statsdb eval {
       SELECT date FROM statsFrom WHERE guildId = :guildId
     }]
@@ -173,19 +182,43 @@ proc stats::put_servstats {guildId {channelId {}}} {
         GROUP BY userId ORDER BY SUM(value) DESC LIMIT 1
       }]
       lassign $toplines topliner toplines
-      lassign [topGuild $guildId 200] topworder topwords
-      lassign [topContainGuild $guildId 140] questioner qperc
-      lassign [topContainGuild $guildId 201] yeller yperc
-      lassign [topContainGuild $guildId 130] capper cperc
-      lassign [topContainGuild $guildId 202] smiler sperc
-      lassign [topContainGuild $guildId 203] frowner fperc
-      lassign [topGuild $guildId 600] nickChanger nickChanges
-      lassign [topGuild $guildId 500] kicker kickers
-      lassign [topGuild $guildId 501] kicked kickeds
-      lassign [topGuild $guildId 400] editor edits
-      lassign [topGuild $guildId 401] deleter deleted
-      lassign [topGuild $guildId 402] janitor janitored
+      lassign [top guild $guildId 200] topworder topwords
+      set bigWords [statsdb eval {
+        SELECT a.userId, (a.value*1.0)/b.value FROM stats a
+        JOIN stats b
+        ON a.guildId = b.guildId AND a.userId = b.userId
+        AND a.action = 300 AND b.action = 200
+        WHERE guildId = :guildId
+        ORDER BY (a.value*1.0)/b.value DESC LIMIT 1
+      }]
+      lassign $bigWords bigWords avgSize
+      set tightLipped [statsdb eval {
+        SELECT a.userId, (a.value*1.0)/b.value FROM stats a
+        JOIN stats b
+        ON a.guildId = b.guildId AND a.userId = b.userId
+        AND a.action = 200 AND b.action < 130
+        WHERE guildId = :guildId
+        ORDER BY (a.value*1.0)/b.value DESC LIMIT 1
+      }]
+      lassign $tightLipped tightLipped avgWords
+      lassign [top_contain guild $guildId 140] questioner qperc
+      lassign [top_contain guild $guildId 201] yeller yperc
+      lassign [top_contain guild $guildId 130] capper cperc
+      lassign [top_contain guild $guildId 202] smiler sperc
+      lassign [top_contain guild $guildId 203] frowner fperc
+      lassign [top guild $guildId 600] nickChanger nickChanges
+      lassign [top guild $guildId 500] kicker kickers
+      lassign [top guild $guildId 501] kicked kickeds
+      lassign [top guild $guildId 400] editor edits
+      lassign [top guild $guildId 401] deleter deleted
+      lassign [top guild $guildId 402] janitor janitored
     } else {
+      foreach channelData [dict get $guildData channels] {
+        if {[dict get $channelData id] == $channelId} {
+          set channelName [dict get $channelData name]
+          break
+        }
+      }
       set lines [statsdb eval {
         SELECT SUM(value) FROM stats
         WHERE channelId = :channelId AND action < 125
@@ -200,42 +233,87 @@ proc stats::put_servstats {guildId {channelId {}}} {
         GROUP BY userId ORDER BY SUM(value) DESC LIMIT 1
       }]
       lassign $toplines topliner toplines
-      lassign [topChannel $channelId 200] topworder topwords
-      lassign [topContainChannel $channelId 140] questioner qperc
-      lassign [topContainChannel $channelId 201] yeller yperc
-      lassign [topContainChannel $channelId 130] capper cperc
-      lassign [topContainChannel $channelId 202] smiler sperc
-      lassign [topContainChannel $channelId 203] frowner fperc
-      lassign [topChannel $channelId 400] editor edits
-      lassign [topChannel $channelId 401] deleter deleted
-      lassign [topChannel $channelId 402] janitor janitored
+      lassign [top channel $channelId 200] topworder topwords
+      set bigWords [statsdb eval {
+        SELECT a.userId, (a.value*1.0)/b.value FROM stats a
+        JOIN stats b
+        ON a.channelId = b.channelId AND a.userId = b.userId
+        AND a.action = 300 AND b.action = 200
+        WHERE channelId = :channelId
+        ORDER BY (a.value*1.0)/b.value DESC LIMIT 1
+      }]
+      lassign $bigWords bigWords avgSize
+      set tightLipped [statsdb eval {
+        SELECT a.userId, (a.value*1.0)/b.value FROM stats a
+        JOIN stats b
+        ON a.channelId = b.channelId AND a.userId = b.userId
+        AND a.action = 200 AND b.action < 130
+        WHERE channelId = :channelId
+        ORDER BY (a.value*1.0)/b.value DESC LIMIT 1
+      }]
+      lassign $tightLipped tightLipped avgWords
+      lassign [top_contain channel $channelId 140] questioner qperc
+      lassign [top_contain channel $channelId 201] yeller yperc
+      lassign [top_contain channel $channelId 130] capper cperc
+      lassign [top_contain channel $channelId 202] smiler sperc
+      lassign [top_contain channel $channelId 203] frowner fperc
+      lassign [top channel $channelId 400] editor edits
+      lassign [top channel $channelId 401] deleter deleted
+      lassign [top channel $channelId 402] janitor janitored
     }
-    append desc "Totals: $lines messages and $words words.\n"
-    append desc "Highest messages recorded: $topliner with $toplines messages!\n"
-    append desc "Highest words recorded: [::meta::getUsernameNick $topworder $guildId] with $topwords words!\n"
-    append desc "• [::meta::getUsernameNick $questioner $guildId] appears to be in search for knowledge, or maybe is just asking too many questions... [format %.1f%% $qperc] of their messages contained questions!\n"
-    append desc "• The loudest one was [::meta::getUsernameNick $yeller $guildId] who yelled [format %.1f%% $yperc] of the time!\n"
-    append desc "• It seems that [::meta::getUsernameNick $capper $guildId]'s shift key is handing; [format %.1f%% $cperc] of the time they wrote in UPPERCASE!\n"
-    append desc "• [::meta::getUsernameNick $smiler $guildId] brings happiness to the world; [format %.1f%% $sperc] of their messages contained smiley faces!\n"
-    append desc "• [::meta::getUsernameNick $frowner $guildId] seems to be sad at the moment; [format %.1f%% $fperc] messages contained sad faces!\n"
-    append desc "• [::meta::getUsernameNick $editer $guildId] keeps changing their minds, or maybe the evil autocorrect is changing their words; they edited their messages $edits times!\n"
-    append desc "• Is [::meta::getUsernameNick $deleter $guildId] a paranoid? They deleted $deleted of their messages!\n"
-    append desc "• [::meta::getUsernameNick $janitor $guildId] is either crazy or just a responsible janitor; they deleted $janitored messages!\n"
+    if {$lines != ""} {
+      append desc "Totals: $lines messages and $words words.\n"
+      append desc "Highest messages recorded: [::meta::getUsernameNick $topliner $guildId] with $toplines messages!\n"
+      append desc "Highest words recorded: [::meta::getUsernameNick $topworder $guildId] with $topwords words!\n"
+      append desc "• [::meta::getUsernameNick $bigWords $guildId] uses a lot of big words! The average size of their words was $avgSize letters per word!\n"
+      append desc "• [::meta::getUsernameNick $tightLipped $guildId] Doesn't speak a lot... They had $avgWords words per line!\n"
+    }
+    if {$qperc != ""} {
+      append desc "• [::meta::getUsernameNick $questioner $guildId] appears to be in search for knowledge, or maybe is just asking too many questions... [format %.1f%% $qperc] of their messages contained questions!\n"
+    }
+    if {$yperc != ""} {
+      append desc "• The loudest one was [::meta::getUsernameNick $yeller $guildId] who yelled [format %.1f%% $yperc] of the time!\n"
+    }
+    if {$cperc != ""} {
+      append desc "• It seems that [::meta::getUsernameNick $capper $guildId]'s shift key is handing; [format %.1f%% $cperc] of the time they wrote in UPPERCASE!\n"
+    }
+    if {$sperc != ""} {
+      append desc "• [::meta::getUsernameNick $smiler $guildId] brings happiness to the world; [format %.1f%% $sperc] of their messages contained smiley faces!\n"
+    }
+    if {$fperc != ""} {
+      append desc "• [::meta::getUsernameNick $frowner $guildId] seems to be sad at the moment; [format %.1f%% $fperc] messages contained sad faces!\n"
+    }
+    if {$edits != ""} {
+      append desc "• [::meta::getUsernameNick $editor $guildId] keeps changing their minds, or maybe the evil autocorrect is changing their words; they edited their messages $edits times!\n"
+    }
+    if {$deleted != ""} {
+      append desc "• Is [::meta::getUsernameNick $deleter $guildId] a paranoid? They deleted $deleted of their messages!\n"
+    }
+    if {$janitored != ""} {
+      append desc "• [::meta::getUsernameNick $janitor $guildId] is either crazy or just a responsible janitor; they deleted $janitored messages!\n"
+    }
     if {$channelId == ""} {
-      append desc "• [::meta::getUsernameNick $nickChanger $guildId] seems to have some personality issues; they changed their nicknames $nickChanges times!\n"
-      append desc "• [::meta::getUsernameNick $kicker $guildId] is either insane or just a fair moderator, kicking people a total of $kickers times!\n"
-      append desc "• [::meta::getUsernameNick $kicked $guildId] seems to get bullied quite a lot, getting kicked $kickeds times!"
+      if {$nickChanges != ""} {
+        append desc "• [::meta::getUsernameNick $nickChanger $guildId] seems to have some personality issues; they changed their nicknames $nickChanges times!\n"
+      }
+      if {$kickers != ""} {
+        append desc "• [::meta::getUsernameNick $kicker $guildId] is either insane or just a fair moderator, kicking people a total of $kickers times!\n"
+        append desc "• [::meta::getUsernameNick $kicked $guildId] seems to get bullied quite a lot, getting kicked $kickeds times!"
+      }
     }
+    set medium [expr {$channelId == "" ? $guildName : $channelName}]
+    set footer "Stats collected as from [clock format $date -timezone UTC]\n"
+    append footer "Disclaimer: All of the above are not meant to be personal "
+    append footer "attacks, but more as lighthearted jokes."
     set msg [dict create embed [dict create \
-      title "Stats for $guildName:"
-      description $desc
-      footer [dict create text \
-        "Stats collected as from [clock format $date -timezone UTC]"]
-    ]
+      title "Stats for $medium:" \
+      description $desc \
+      footer [dict create text $footer] \
+    ]]
   } else {
     set msg "There are no stats saved for $loc!"
   }
-  ::meta::putdc [dict create content $msg] 1
+  ::meta::putdc $msg 1
 }
 
 proc stats::clear_servstats {guildId {channelId {}}} {
@@ -243,7 +321,7 @@ proc stats::clear_servstats {guildId {channelId {}}} {
     set stats [statsdb eval {SELECT * FROM stats WHERE guildId = :guildId}]
     if {[llength $stats] > 0} {
       statsdb eval {DELETE FROM stats WHERE guildId = :guildId}
-      statsdb eval {DELETE FROM statsFrom WHERE guildId = :guildId}]
+      statsdb eval {DELETE FROM statsFrom WHERE guildId = :guildId}
       set msg "Deleted stats for the server!"
     } else {
       set msg "There are no stats saved for the server!"
@@ -279,7 +357,7 @@ proc stats::bump {type guildId channelId userId content} {
       bump_action $guildId $channelId $userId $hr
       
       # All caps
-      if {[string toupper $content] eq $content} {
+      if {[string toupper $content] eq $content && [regexp {[A-Z]+} $content]} {
         bump_action $guildId $channelId $userId 130
       
       # Yelling
@@ -331,7 +409,7 @@ proc stats::bump {type guildId channelId userId content} {
       }
       
       # Letters
-      set letters [llength [regexp -all {[[:alnum:]]} $content]]
+      set letters [llength [regexp -all {[[:alpha:]]} $content]]
       bump_action $guildId $channelId $userId 300 $letters
     }
     editMsg {
@@ -349,7 +427,7 @@ proc stats::bump {type guildId channelId userId content} {
       bump_action $guildId $channelId $content 501
     }
     nickChange {
-      if {![::meta::hasPerm $userId {CHANGE_NICKNAME}]} {return}
+      if {![::meta::has_perm $userId {CHANGE_NICKNAME}]} {return}
       bump_action $guildId $channelId $userId 600
     }
     nameChange {
@@ -362,9 +440,9 @@ proc stats::bump {type guildId channelId userId content} {
 proc stats::reg_stats {guildId arg} {
   set arg [split $arg]
   if {[llength $arg] != 2} {
-    ::meta::putdc [dict create content \
-      "Wrong number of parameters. Should be `!statsreg (smile|frown) *emote*`" \
-    ] 0
+    set msg "Wrong number of parameters. Should be `!stats reg (smile|frown) "
+    append msg "*emote*`"
+    ::meta::putdc [dict create content $msg] 0
     return
   }
   lassign $arg type text
@@ -390,7 +468,7 @@ proc stats::bump_action {guildId channelId userId action {amt 1}} {
   }]
   if {$recs == ""} {
     statsdb eval {
-      INSERT INTO stats VALUES (:guildId, :channelId, :userId, :action, 1)
+      INSERT INTO stats VALUES (:guildId, :channelId, :userId, :action, :amt)
     }
   } else {
     statsdb eval {
@@ -400,44 +478,30 @@ proc stats::bump_action {guildId channelId userId action {amt 1}} {
   }
 }
 
-proc stats::top_guild {guildId action} {
-  return [statsdb eval {
+proc stats::top {type id action} {
+  set query {
     SELECT userId, value FROM stats 
-    WHERE guildId = :guildId AND type = :action
+    WHERE %s = :%s AND action = :action
     ORDER BY value DESC LIMIT 1
   }
+  return [statsdb eval [format $query $type $id]]
 }
 
-proc stats::top_contain_guild {guildId action} {
-  return [statsdb eval {
+proc stats::top_contain {type id action} {
+  set query {
     SELECT a.userId, 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) FROM stats a
     JOIN stats b
-    ON a.guildId = b.guildId AND a.userId = b.userId 
-    AND a.type < 125 AND b.type = :action
-    WHERE a.guildId = :guildId
+    ON a.%sId = b.%sId AND a.userId = b.userId 
+    AND a.action < 125 AND b.action = :action
+    WHERE a.%sId = :%s
     GROUP BY a.userId
     ORDER BY 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) DESC LIMIT 1
-  }]
-}
-
-proc stats::top_channel {channelId action} {
-  return [statsdb eval {
-    SELECT userId, value FROM stats 
-    WHERE channelId = :channelId AND type = :action
-    ORDER BY value DESC LIMIT 1
   }
+  return [statsdb eval [format $query $type $type $type $id]]
 }
 
-proc stats::top_contain_channel {channelId action} {
-  return [statsdb eval {
-    SELECT a.userId, 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) FROM stats a
-    JOIN stats b
-    ON a.channelId = b.channelId AND a.userId = b.userId 
-    AND a.type < 125 AND b.type = :action
-    WHERE a.channelId = :channelId
-    GROUP BY a.userId
-    ORDER BY 100*SUM(b.value*1.0)/SUM(a.value)/COUNT(*) DESC LIMIT 1
-  }]
+proc stats::pre_rehash {} {
+  return
 }
 
 puts "stats.tcl loaded"
