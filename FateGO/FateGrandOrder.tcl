@@ -71,7 +71,7 @@ proc fgo::command {} {
         }
         default {
             set found 0
-            for {set i 0} {$i < [llength $fgo(listener)} {incr i} {
+            for {set i 0} {$i < [llength $fgo(listener)]} {incr i} {
                 set listener [lindex $fgo(listener) $i]
                 if {
                     [dict get $listener user] == $userId &&
@@ -530,20 +530,26 @@ proc fgo::manage_profile {userId param} {
         "" -
         v -
         view {
-            view_profile $userId $param
+            profile_view $userId [lrange $param 1 end]
+            return
         }
         e -
         edit {
             set msg "Sorry this has not been implemented yet."
+            #profile_edit $userId [lrange $param 1 end]
+            #return
         }
         d -
         del -
         delete {
             profile_delete $userId
+            return
         }
         find -
         search {
             set msg "Sorry this has not been implemented yet."
+            #profile_search [lrange $param 1 end]
+            #return
         }
         default {
             set msg "Unrecognised parameter. Usage **!fgoprofile "
@@ -553,7 +559,7 @@ proc fgo::manage_profile {userId param} {
     ::meta::putdc [dict create content $msg] 0
 }
 
-proc fgo::view_profile {userId param} {
+proc fgo::profile_view {userId param} {
     upvar guildId guildId
     if {$param in {"" "me"}} {
         set found [fgodb eval {
@@ -606,7 +612,7 @@ proc fgo::view_profile {userId param} {
     append desc "**Server:** [sanitize $server]\n"
     append desc "**Friend Code:** [sanitize $friend_code]\n"
     append desc "**Message:** [sanitize $message]\n"
-    append desc "Profile visibility: [sanitize $share share]"
+    append desc "**Profile visibility:** [sanitize $share share]"
     set msg [dict create \
         title "Profile Card" \
         description $desc \
@@ -615,6 +621,9 @@ proc fgo::view_profile {userId param} {
     ::meta::putdc [dict create embed $msg] 0
 }
 
+proc fgo::profile_edit {userId param} {
+
+}
 
 proc fgo::profile_delete {userId} {
     variable fgo
@@ -657,6 +666,10 @@ proc fgo::profile_delete_confirm {userId text {afterId {}}} {
         }
     }
     ::meta::putdc [dict create content $msg] 0
+}
+
+proc fgo::profile_search {param} {
+
 }
 
 proc fgo::import_url {userId fullData} {
@@ -713,7 +726,7 @@ proc fgo::import_url {userId fullData} {
     }
 
     set master [fgodb eval {SELECT 1 FROM master WHERE id = :userId}]
-    set msg "Your servants were successfully added and/or updated."
+    set msg "Your servants were successfully added"
     if {$master == ""} {
         fgodb eval {INSERT INTO master VALUES (
             :userId,
@@ -726,13 +739,15 @@ proc fgo::import_url {userId fullData} {
             :now,
             null
         )}
-        append msg " An account for you has automatically been created with " \
+        append msg ". An account for you has automatically been created with " \
                 "the servants you have created since it is your first time " \
                 "registering a servant. Should you wish to delete it, you can" \
                 " use `!fgodelete` to remove all your information saved. " \
                 "If you also want others to see your account, you can turn " \
                 "your account visibility settings on (off by default) by " \
                 "using `!fgoshare on`."
+    } else {
+        append msg " and/or updated."
     }
 
     ::meta::putdc [dict create content $msg] 0

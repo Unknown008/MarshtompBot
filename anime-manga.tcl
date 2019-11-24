@@ -294,5 +294,5 @@ proc anime::pre_rehash {} {
     }
 }
 
-lappend ::anime::afterIds [after 10000 [list ::anime::checksite]]
+#lappend ::anime::afterIds [after 10000 [list ::anime::checksite]]
 puts "anime-manga.tcl v$::anime::anime(ver) loaded"
