@@ -158,6 +158,14 @@ proc meta::command {data text channelId guildId userId} {
         "!botstats" {
             put_bot_stats
         }
+        "!delete" {
+            if {
+                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
+                || $userId == $::ownerId
+            } {
+                deletedc [regsub {!delete *} $text {}] $channelId
+            }
+        }
         "!bulkdelete" {
             if {
                 [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
@@ -165,14 +173,6 @@ proc meta::command {data text channelId guildId userId} {
             } {
                 set option [lassign [regsub {!bulkdelete *} $text {}] n]
                 bulk_delete $n $option
-            }
-        }
-        "!delete" {
-            if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
-                || $userId == $::ownerId
-            } {
-                deletedc [regsub {!delete *} $text {}] $channelId
             }
         }
         "!help" {
@@ -202,6 +202,367 @@ proc meta::command {data text channelId guildId userId} {
     }
 }
 
+#############################
+##### Public procedures #####
+#############################
+
+# meta::setup --
+#
+#   Manage the settings for automatic messages. Currently for logs, serebii 
+#   articles and anime subs. Saves the settings per guild in the config sqlite3 
+#   table
+#
+# Arguments:
+#   arg    arg must be two words:
+#             type - type of setting (log, serebii, anime
+#             channel - channel ID, object or name
+#
+# Results:
+#   Posts a message informaing whether the action was successful or not.
+
+proc meta::setup {arg} {
+    if {[llength [split $arg { }]] != 2} {
+        set msg "Incorrect number of parameters.\nUsage: "
+        append msg "!setup **type** **channel**"
+        putdc [dict create content $msg] 0
+        return
+    }
+    lassign [split $arg { }] type channel
+    if {$type ni [list log anime serebii]} {
+        putdc [dict create content \
+                "Invalid setup type. Should be log, serebii or anime"] 0
+        return
+    }
+    
+    upvar guildId guildId
+    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
+    set guildData {*}$guildData
+    set channels [dict get $guildData channels]
+
+    if {[regexp {^(?:<#([0-9]+)>|([0-9]+))$} $channel - m1 m2]} {
+        set channelId $m1$m2
+    } else {
+        set chanNames [lmap x $channels {dict get $x name}]
+        if {$channel ni $chanNames} {
+            putdc [dict create content "Invalid channel."] 0
+            return
+        }
+        set idx [lsearch $chanNames $channel]
+        set channelId [dict get [lindex $channels $idx] id]
+    }
+    
+    set channelIds [lmap x $channels {dict get $x id}]
+    if {$channelId ni $channelIds} {
+        putdc [dict create content "Invalid channel."] 0
+        return
+    }
+    set res [metadb eval {
+        SELECT channelId FROM config
+        WHERE guildId = :guildId AND
+        type = :type
+    }]
+    if {$res eq ""} {
+        metadb eval {INSERT INTO config VALUES(:guildId, :type, :channelId)}
+        set msg "<#$channelId> has been set as $type."
+    } elseif {$res eq $channelId} {
+        set msg "<#$channelId> is already set as $type!"
+    } else {
+        metadb eval {
+            UPDATE config SET channelId = :channelId
+            WHERE guildId = :guildId AND type = :type
+        }
+        set msg "$type was changed from <#$res> to <#$channelId>"
+    }
+    putdc [dict create content $msg] 0
+}
+
+# meta::ban --
+#
+#   Ban a user from using this bot's commands
+#
+# Arguments:
+#   text   User object or user ID of the user to be banned
+#
+# Results:
+#   Posts whether the ban was successful or not
+
+proc meta::ban {text} {
+    set users [guild eval {SELECT userId FROM users}]
+    if {[regexp {<@!?([0-9]+)>} $text - userId] && $userId in $users} {
+        set result [metadb eval {
+            SELECT userId FROM banned WHERE userId = :userId
+        }]
+        if {$result != ""} {
+            set msg "<@$userId> is already banned from my commands!"
+        } else {
+            metadb eval {INSERT INTO banned VALUES(@userId)}
+            set msg "<@$userId> was banned from all my commands!"
+        }
+    } else {
+        set msg "No such user found."
+    }
+    putdc [dict create content $msg] 0
+}
+
+
+# meta::unban --
+#
+#   Unban a user from using this bot's commands
+#
+# Arguments:
+#   text   User object or user ID of the user to be unbanned
+#
+# Results:
+#   Posts whether the unban was successful or not
+
+proc meta::unban {text} {
+    if {[regexp {<@!?([0-9]+)>} $text - userId]} {
+        set result [metadb eval {
+            SELECT userId FROM banned WHERE userId = :userId
+        }]
+        if {$result != ""} {
+            metadb eval {DELETE FROM banned WHERE userId = :userId}
+            set msg "<@$userId>'s ban from my commands was lifted!"
+        } else {
+            set msg "No ban for <@$userId> was found!"
+        }
+    } else {
+        set msg "No such user found."
+    }
+    putdc [dict create content $msg] 0
+}
+
+# meta::put_bot_stats --
+#
+#   Posts the count for all registered events the bot has gone through in the
+#   channel the command was invoked
+#
+# Arguments:
+#   None
+#
+# Results:
+#   None
+
+proc meta::put_bot_stats {} {
+    variable botstats
+    set msg [list]
+    set kmax 8
+    set vmax 0
+    
+    lappend msg [list SERVERS [guild eval {SELECT COUNT(*) FROM guild}]]
+    lappend msg [list CHANNELS [guild eval {SELECT COUNT(*) FROM chan}]]
+    lappend msg ""
+    foreach k $botstats(order) {
+        if {$k eq "UPTIME"} {
+            set v [formatTime [expr {[clock seconds]-$botstats($k)}]]
+            lappend msg [list $k $v]
+        } else {
+            if {$botstats($k) > 0} {
+                if {$botstats($k) > 1000} {
+                    regsub -all {[0-9](?=(?:\d{3})+$)} $botstats($k) {\0,} v
+                } else {
+                    set v $botstats($k)
+                }
+                lappend msg [list $k $v]
+            } else {
+                continue
+            }
+        }
+        set kmax [expr {[string len $k] > $kmax ? [string len $k] : $kmax}]
+        set vmax [expr {[string len $v] > $vmax ? [string len $v] : $vmax}]
+    }
+    set msg [lmap x $msg {
+        if {$x == ""} {
+            set x
+        } else {
+            format "%-${kmax}s %${vmax}s" {*}$x
+        }
+    }]
+    putdc [dict create content "```[join $msg \n]```"] 0
+}
+
+# meta::delete --
+#
+#   Deletes a message
+#
+# Arguments:
+#   msgId    The ID of the message to be deleted
+#
+# Results:
+#   None
+
+proc meta::delete {msgId} {
+    if {![has_perm [dict get [set ${sessionNs}::self] id] MANAGE_MESSAGES]} {
+        set msg "I don't have the permission (Manage Messages) to execute this."
+        putdc [dict create content $msg] 0
+        return
+    }
+}
+
+# meta::bulk_delete --
+#
+#   Deletes the previous messages in the current channel. 
+#
+# Arguments:
+#   n        Number of messages to be deleted
+#   options  Options for messages to be deleted (only one option will be 
+#            considered):
+#               before msgID
+#               after  msgID
+#               around msgID
+#
+# Results:
+#   None
+
+proc meta::bulk_delete {n option} {
+    upvar guildId guildId
+    if {![has_perm [dict get [set ${::session}::self] id] MANAGE_MESSAGES]} {
+        set msg "I don't have the permission (Manage Messages) to execute this."
+        putdc [dict create content $msg] 0
+        return
+    }
+    upvar channelId channelId
+    if {![string is integer -strict $n] && $n < 2 && $n > 100} {
+        set msg {Invalid number of message supplied. Usage: **!bulkdelete }
+        append msg {_number\_of\_messages option -force_**. __**option**__ can }
+        append msg {be one of: __**before** msgId__, __**after** msgId__, }
+        append msg {__**around** msgId__. Between 2 and 100 messages inclusive }
+        append msg {can be bulk deleted.}
+        putdc [dict create content $msg] 0
+        return
+    }
+    set force 0
+    set idx [lsearch $option "-force"]
+    if {$idx > -1} {
+        incr force
+        set option [lreplace $option $idx $idx]
+    }
+    set options [lassign $option type value]
+    set params [dict create limit $n]
+    if {$type != ""} {
+        if {
+            $type in {before after around} && [string is integer -strict $value]
+            && $value < 0
+        } {
+            dict set params $type $value
+        } else {
+            set msg {Invalid options. Usage: **!bulkdelete }
+            append msg {_number\_of\_messages option -force_**. __**option**__ }
+            append msg {can be one of: __**before** msgId__, __**after** }
+            append msg {msgId__, __**around** msgId__.}
+            putdc [dict create content $msg] 0
+            return
+        }
+    }
+    if {[catch {discord getMessages $::session $channelId $params 1} resCoro]} {
+        return
+    }
+    if {$resCoro eq {}} {return}
+    yield $resCoro
+    set response [$resCoro]
+    set data [lindex $response 0]
+    if {$data eq {}} {
+        set msg "An error occurred. Could not find messages to delete."
+        putdc [dict create content $msg] 0
+        return
+    }
+    set lMsg [list]
+    set oMsg [list]
+    set back [clock add [clock seconds] -14 days]
+    set total [llength $data]
+    foreach msg $data {
+        set msgId [dict get $msg id]
+        set msgDate [expr {
+            [getSnowflakeUnixTime $msgId $::discord::Epoch]/1000
+        }]
+        if {$back < $msgDate} {
+            lappend lMsg $msgId
+        } elseif {$force} {
+            lappend oMsg $msgId
+        }
+    }
+    set cmd [expr {[llength $lMsg] < 2 ? deleteMessage : bulkDeleteMessages}]
+    if {[catch {discord $cmd $::session $channelId $lMsg 1} resCoro]} {
+        return
+    }
+    if {$resCoro eq {}} {return}
+    yield $resCoro
+    set response [$resCoro]
+    if {[dict get [lindex $response 1] http] != "HTTP/1.1 204 NO CONTENT"} {
+        set body [dict get [lindex $response 1] body]
+        if {$body ne {} && [catch {json::json2dict $body} body]} {
+            set msg [dict get $body message]
+        } else {
+            set msg "An error occurred. Could not delete messages."
+        }
+    } else {
+        set del [llength $lMsg]
+        if {$del != $n} {
+            if {$total == $del} {
+                set msg "Successfully deleted $del messages (only $del messages"
+                append msg " had been posted to this channel)."
+            } elseif {$force} {
+                set msg "Successfully bulk deleted $del messages. The remaining"
+                append msg " [expr {$n-$del}] messages will be individually "
+                append msg "deleted within the next few moments."
+                after idle [list coroutine ::meta::deletedc[::id] \
+                        ::meta::deletedc $oMsg $channelId]
+            } else {
+                set msg "Successfully deleted $del messages ([expr {$n-$del}] "
+                append msg "messages did not get deleted due to being too old -"
+                append msg " bulk delete cannot be used for messages older than"
+                append msg " 14 days)."
+            }
+        } else {
+            set msg "Successfully deleted $n messages."
+        }
+    }
+    after idle [list coroutine ::meta::putdc[::id] ::meta::putdc \
+            [dict create content $msg] 0 $channelId]
+}
+
+# meta::help --
+#
+#   Posts a pastebin link to the help documents
+#
+# Arguments:
+#   None
+#
+# Results:
+#   None
+
+proc meta::help {} {
+    set msg "Available commands are listed here: "
+    append msg "https://github.com/Unknown008/MarshtompBot/blob/master/help.md"
+    putdc [dict create content $msg] 0
+}
+
+# meta::about --
+#
+#   Gives information about the bot
+#
+# Arguments:
+#   None
+#
+# Results:
+#   None
+
+proc meta::about {} {
+    set msg "Marshtomp is a bot managed by Unknown008#4135 created by "
+    append msg "qwename#5406. The bot is a multipurpose bot with various "
+    append msg "modules ranging from server management, anime torrent feed, "
+    append msg "Pok\u00E9dex resource, Pok\u00E9mon news feed from serebii.net,"
+    append msg " Fate Grand Order resource to various silly 'fun' modules like "
+    append msg "classic 8ball. More features might have been implemented when "
+    append msg "you see this message."
+
+    putdc [dict create content $msg] 1
+}
+
+#############################
+##### Private procedures ####
+#############################
+
 # meta::putdc --
 #
 #   Posts a message into a certain channel ID
@@ -221,7 +582,7 @@ proc meta::command {data text channelId guildId userId} {
 
 proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
     variable localLimits
-    
+    puts "meta::putdc called from [info level 1] with data $data"
     if {$channelId eq ""} {
         set channelId [uplevel #2 {set channelId}]
     } elseif {$channelId eq "test"} {
@@ -300,7 +661,7 @@ proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
 
 proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
     variable localLimits
-    
+    puts "meta::putdcPM called from [info level 1] with data $msgdata for $userId"
     if {$encode && [dict exists $msgdata content]} {
         set text [dict get $msgdata content]
         set text [encoding convertto utf-8 $text]
@@ -518,134 +879,51 @@ proc meta::update_members {} {
             set lastId 0
             set limit 1000
             while {$member_count > 0} {
-                if {$member_count > $limit} {
-                    set range $limit
-                } else {
-                    set range $member_count
-                }
+                set range [expr {min($member_count, $limit)}]
                 incr member_count -$range
                 set resCoro [discord getMembers $::session $guildId $range \
                         $lastId 1]
-                if {$resCoro ne {}} {
-                    yield $resCoro
-                    set response [$resCoro]
-                    set data [lindex $response 0]
-                    
-                    if {$data ne {}} {
-                        foreach member $data {
-                            set user [dict get $member user]
-                            set userId [dict get $user id]
-                            set userData [guild eval {
-                                SELECT data FROM users WHERE userId = :userId
-                            }]
-                            set exists $userData
-                            if {$userData == ""} {
-                                dict for {k v} $user {
-                                    dict set userData $k $v
-                                }
-                                if {[dict exists $member nick]} {
-                                    dict set userData nick $guildId \
-                                            [dict get $member nick]
-                                }
-                                guild eval {
-                                    INSERT INTO users VALUES
-                                        (:userId, :userData)
-                                }
-                            } else {
-                                set userData {*}$userData
-                                if {[dict exists $member nick]} {
-                                    dict set userData nick $guildId \
-                                            [dict get $member nick]
-                                }
-                                guild eval {
-                                    UPDATE users SET data = :userData
-                                    WHERE userId = :userId
-                                }
+                if {$resCoro eq {}} {return}
+                
+                yield $resCoro
+                set response [$resCoro]
+                set data [lindex $response 0]
+                
+                if {$data ne {}} {
+                    foreach member $data {
+                        set user [dict get $member user]
+                        set userId [dict get $user id]
+                        set userData [guild eval {
+                            SELECT data FROM users WHERE userId = :userId
+                        }]
+                        set exists $userData
+                        if {$userData == ""} {
+                            dict for {k v} $user {
+                                dict set userData $k $v
+                            }
+                            if {[dict exists $member nick]} {
+                                dict set userData nick $guildId \
+                                        [dict get $member nick]
+                            }
+                            guild eval {
+                                INSERT INTO users VALUES (:userId, :userData)
+                            }
+                        } else {
+                            set userData {*}$userData
+                            if {[dict exists $member nick]} {
+                                dict set userData nick $guildId \
+                                        [dict get $member nick]
+                            }
+                            guild eval {
+                                UPDATE users SET data = :userData
+                                WHERE userId = :userId
                             }
                         }
                     }
-                } else {
-                    return
                 }
             }
         }
     }
-}
-
-# meta::help --
-#
-#   Posts a pastebin link to the help documents
-#
-# Arguments:
-#   None
-#
-# Results:
-#   None
-
-proc meta::help {} {
-    set msg "Available commands are listed here: "
-    append msg "https://github.com/Unknown008/MarshtompBot/blob/master/help.md"
-    putdc [dict create content $msg] 0
-}
-
-# meta::setup --
-#
-#   Manage the settings for automatic messages. Currently for logs, serebii 
-#   articles and anime subs. Saves the settings per guild in the config sqlite3 
-#   table
-#
-# Arguments:
-#   arg    arg must be two words:
-#             type - type of setting (log, serebii, anime
-#             channel - channel ID, object or name
-#
-# Results:
-#   Posts a message informaing whether the action was successful or not.
-
-proc meta::setup {arg} {
-    if {[llength [split $arg { }]] != 2} {
-        set msg "Incorrect number of parameters.\nUsage: "
-        append msg "!setup **type** **channel**"
-        putdc [dict create content $msg] 0
-        return
-    }
-    lassign [split $arg { }] type channel
-    if {$type ni [list log anime serebii]} {
-        putdc [dict create content \
-                "Invalid setup type. Should be log, serebii or anime"] 0
-        return
-    }
-    
-    upvar guildId guildId
-    if {[regexp {^(?:<#([0-9]+)>|([0-9]+))$} $channel - m1 m2]} {
-        set channelId $m1$m2
-    }
-    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
-    set guildData {*}$guildData
-    set channels [dict get $guildData channels]
-    set channelIds [lmap x $channels {dict get $x id}]
-    if {$channelId ni $channelIds} {
-        putdc [dict create content "Invalid channel."] 0
-        return
-    }
-    set res [metadb eval {
-        SELECT channelId FROM config
-        WHERE guildId = :guildId AND
-        type = :type
-    }]
-    if {$res eq ""} {
-        metadb eval {INSERT INTO config VALUES(:guildId, :type, :channelId)}
-        set msg "<#$channelId> has been set as $type."
-    } elseif {$res eq $channelId} {
-        set msg "<#$channelId> is already set as $type!"
-    } else {
-        metadb eval {
-            UPDATE config SET channelId = :channelId
-            WHERE guildId = :guildId AND type = :type
-        }
-        set msg "$type was changed from <#$res> to <#$channelId>"
-    }
-    putdc [dict create content $msg] 0
 }
 
 # meta::log_delete --
@@ -776,149 +1054,6 @@ proc meta::log_chat {guildId msgId userId content embed attachment} {
     }
 }
 
-# meta::bump --
-#
-#   Increments events from discord
-#
-# Arguments:
-#   event   Event that was triggered
-#
-# Results:
-#   None
-
-proc meta::bump {event} {
-    variable botstats
-    if {[info exists botstats($event)]} {
-        incr botstats($event)
-    }
-}
-
-# meta::put_bot_stats --
-#
-#   Posts the count for all registered events the bot has gone through in the
-#   channel the command was invoked
-#
-# Arguments:
-#   None
-#
-# Results:
-#   None
-
-proc meta::put_bot_stats {} {
-    variable botstats
-    set msg [list]
-    set kmax 8
-    set vmax 0
-    
-    lappend msg [list SERVERS [guild eval {SELECT COUNT(*) FROM guild}]]
-    lappend msg [list CHANNELS [guild eval {SELECT COUNT(*) FROM chan}]]
-    lappend msg ""
-    foreach k $botstats(order) {
-        if {$k eq "UPTIME"} {
-            set v [formatTime [expr {[clock seconds]-$botstats($k)}]]
-            lappend msg [list $k $v]
-        } else {
-            if {$botstats($k) > 0} {
-                if {$botstats($k) > 1000} {
-                    regsub -all {[0-9](?=(?:\d{3})+$)} $botstats($k) {\0,} v
-                } else {
-                    set v $botstats($k)
-                }
-                lappend msg [list $k $v]
-            } else {
-                continue
-            }
-        }
-        set kmax [expr {[string len $k] > $kmax ? [string len $k] : $kmax}]
-        set vmax [expr {[string len $v] > $vmax ? [string len $v] : $vmax}]
-    }
-    set msg [lmap x $msg {
-        if {$x == ""} {
-            set x
-        } else {
-            format "%-${kmax}s %${vmax}s" {*}$x
-        }
-    }]
-    putdc [dict create content "```[join $msg \n]```"] 0
-}
-
-# meta::ban --
-#
-#   Ban a user from using this bot's commands
-#
-# Arguments:
-#   text   User object or user ID of the user to be banned
-#
-# Results:
-#   Posts whether the ban was successful or not
-
-proc meta::ban {text} {
-    set users [guild eval {SELECT userId FROM users}]
-    if {[regexp {<@!?([0-9]+)>} $text - userId] && $userId in $users} {
-        set result [metadb eval {
-            SELECT userId FROM banned WHERE userId = :userId
-        }]
-        if {$result != ""} {
-            set msg "<@$userId> is already banned from my commands!"
-        } else {
-            metadb eval {INSERT INTO banned VALUES(@userId)}
-            set msg "<@$userId> was banned from all my commands!"
-        }
-    } else {
-        set msg "No such user found."
-    }
-    putdc [dict create content $msg] 0
-}
-
-# meta::unban --
-#
-#   Unban a user from using this bot's commands
-#
-# Arguments:
-#   text   User object or user ID of the user to be unbanned
-#
-# Results:
-#   Posts whether the unban was successful or not
-
-proc meta::unban {text} {
-    if {[regexp {<@!?([0-9]+)>} $text - userId]} {
-        set result [metadb eval {
-            SELECT userId FROM banned WHERE userId = :userId
-        }]
-        if {$result != ""} {
-            metadb eval {DELETE FROM banned WHERE userId = :userId}
-            set msg "<@$userId>'s ban from my commands was lifted!"
-        } else {
-            set msg "No ban for <@$userId> was found!"
-        }
-    } else {
-        set msg "No such user found."
-    }
-    putdc [dict create content $msg] 0
-}
-
-# meta::formatTime --
-#
-#   Formats time to how long ago the provided time is to the present time
-#
-# Arguments:
-#   duration   Unix time to be formatted
-#
-# Results:
-#   Time formatted. E.g. +1 day(s) 2h3m4s
-
-proc meta::formatTime {duration} {
-    set s [expr {$duration % 60}]
-    set i [expr {$duration / 60}]
-    set m [expr {$i % 60}]
-    set i [expr {$i / 60}]
-    set h [expr {$i % 24}]
-    set d [expr {$i / 24}]
-    return [format "%+d day(s) %02dh%02dm%02ds" $d $h $m $s]
-}
-
-### User status (online, offline), game change
-
 # meta::log_presence --
 #
 #   Logs change in user status (online, offline), game change
@@ -964,8 +1099,6 @@ proc meta::log_presence {guildId userId data} {
     }
     # Else check for game change or status change (log in/out)
 }
-
-### Nick, roles
 
 # meta::log_member --
 #
@@ -1284,6 +1417,43 @@ proc meta::log_ban_remove {guildId userId} {
     }
 }
 
+# meta::bump --
+#
+#   Increments events from discord
+#
+# Arguments:
+#   event   Event that was triggered
+#
+# Results:
+#   None
+
+proc meta::bump {event} {
+    variable botstats
+    if {[info exists botstats($event)]} {
+        incr botstats($event)
+    }
+}
+
+# meta::formatTime --
+#
+#   Formats time to how long ago the provided time is to the present time
+#
+# Arguments:
+#   duration   Unix time to be formatted
+#
+# Results:
+#   Time formatted. E.g. +1 day(s) 2h3m4s
+
+proc meta::formatTime {duration} {
+    set s [expr {$duration % 60}]
+    set i [expr {$duration / 60}]
+    set m [expr {$i % 60}]
+    set i [expr {$i / 60}]
+    set h [expr {$i % 24}]
+    set d [expr {$i / 24}]
+    return [format "%+d day(s) %02dh%02dm%02ds" $d $h $m $s]
+}
+
 # meta::has_perm --
 #
 #   Checks if a user has any one of the specified permissions or is owner
@@ -1455,167 +1625,6 @@ proc meta::get_user_id {guildId text} {
             return ""
         }
     }
-}
-
-# meta::delete --
-#
-#   Deletes a message
-#
-# Arguments:
-#   msgId    The ID of the message to be deleted
-#
-# Results:
-#   None
-
-proc meta::delete {msgId} {
-    if {![has_perm [dict get [set ${sessionNs}::self] id] MANAGE_MESSAGES]} {
-        set msg "I don't have the permission (Manage Messages) to execute this."
-        putdc [dict create content $msg] 0
-        return
-    }
-    
-}
-
-# meta::bulk_delete --
-#
-#   Deletes the previous messages in the current channel. 
-#
-# Arguments:
-#   n        Number of messages to be deleted
-#   options  Options for messages to be deleted (only one option will be 
-#            considered):
-#               before msgID
-#               after  msgID
-#               around msgID
-#
-# Results:
-#   None
-
-proc meta::bulk_delete {n option} {
-    upvar guildId guildId
-    if {![has_perm [dict get [set ${::session}::self] id] MANAGE_MESSAGES]} {
-        set msg "I don't have the permission (Manage Messages) to execute this."
-        putdc [dict create content $msg] 0
-        return
-    }
-    upvar channelId channelId
-    if {![string is integer -strict $n] && $n < 2 && $n > 100} {
-        set msg {Invalid number of message supplied. Usage: **!bulkdelete }
-        append msg {_number\_of\_messages option -force_**. __**option**__ can }
-        append msg {be one of: __**before** msgId__, __**after** msgId__, }
-        append msg {__**around** msgId__. Between 2 and 100 messages inclusive }
-        append msg {can be bulk deleted.}
-        putdc [dict create content $msg] 0
-        return
-    }
-    set force 0
-    set idx [lsearch $option "-force"]
-    if {$idx > -1} {
-        incr force
-        set option [lreplace $option $idx $idx]
-    }
-    set options [lassign $option type value]
-    set params [dict create limit $n]
-    if {$type != ""} {
-        if {
-            $type in {before after around} && [string is integer -strict $value]
-            && $value < 0
-        } {
-            dict set params $type $value
-        } else {
-            set msg {Invalid options. Usage: **!bulkdelete }
-            append msg {_number\_of\_messages option -force_**. __**option**__ }
-            append msg {can be one of: __**before** msgId__, __**after** }
-            append msg {msgId__, __**around** msgId__.}
-            putdc [dict create content $msg] 0
-            return
-        }
-    }
-    if {[catch {discord getMessages $::session $channelId $params 1} resCoro]} {
-        return
-    }
-    if {$resCoro eq {}} {return}
-    yield $resCoro
-    set response [$resCoro]
-    set data [lindex $response 0]
-    if {$data eq {}} {
-        set msg "An error occurred. Could not find messages to delete."
-        putdc [dict create content $msg] 0
-        return
-    }
-    set lMsg [list]
-    set oMsg [list]
-    set back [clock add [clock seconds] -14 days]
-    set total [llength $data]
-    foreach msg $data {
-        set msgId [dict get $msg id]
-        set msgDate [expr {
-            [getSnowflakeUnixTime $msgId $::discord::Epoch]/1000
-        }]
-        if {$back < $msgDate} {
-            lappend lMsg $msgId
-        } elseif {$force} {
-            lappend oMsg $msgId
-        }
-    }
-    set cmd [expr {[llength $lMsg] < 2 ? deleteMessage : bulkDeleteMessages}]
-    if {[catch {discord $cmd $::session $channelId $lMsg 1} resCoro]} {
-        return
-    }
-    if {$resCoro eq {}} {return}
-    yield $resCoro
-    set response [$resCoro]
-    if {[dict get [lindex $response 1] http] != "HTTP/1.1 204 NO CONTENT"} {
-        set body [dict get [lindex $response 1] body]
-        if {$body ne {} && [catch {json::json2dict $body} body]} {
-            set msg [dict get $body message]
-        } else {
-            set msg "An error occurred. Could not delete messages."
-        }
-    } else {
-        set del [llength $lMsg]
-        if {$del != $n} {
-            if {$total == $del} {
-                set msg "Successfully deleted $del messages (only $del messages"
-                append msg " had been posted to this channel)."
-            } elseif {$force} {
-                set msg "Successfully bulk deleted $del messages. The remaining"
-                append msg " [expr {$n-$del}] messages will be individually "
-                append msg "deleted within the next few moments."
-                after idle [list coroutine ::meta::deletedc[::id] \
-                        ::meta::deletedc $oMsg $channelId]
-            } else {
-                set msg "Successfully deleted $del messages ([expr {$n-$del}] "
-                append msg "messages did not get deleted due to being too old -"
-                append msg " bulk delete cannot be used for messages older than"
-                append msg " 14 days)."
-            }
-        } else {
-            set msg "Successfully deleted $n messages."
-        }
-    }
-    after idle [list coroutine ::meta::putdc[::id] ::meta::putdc \
-            [dict create content $msg] 0 $channelId]
-}
-
-# meta::about --
-#
-#   Gives information about the bot
-#
-# Arguments:
-#   None
-#
-# Results:
-#   None
-
-proc meta::about {} {
-    set msg "Marshtomp is a bot managed by Unknown008#4135 created by qwename. "
-    append msg "The bot is a multipurpose bot with various modules ranging "
-    append msg "from server management, anime torrent feed, Pokedex resource, "
-    append msg "Pokemon news feed, Fate Grand Order resource to various silly "
-    append msg "'fun' modules like classic 8ball."
-
-    putdc [dict create content $msg] 0
 }
 
 after idle [list ::meta::cleanDebug]

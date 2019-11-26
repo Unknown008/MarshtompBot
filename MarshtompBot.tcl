@@ -47,7 +47,7 @@ set modules {
     stats.tcl                 stats
     pogo.tcl                  pogo
     anime-manga.tcl           anime
-    FateGo/FateGrandOrder.tcl fgo
+    FateGO/FateGrandOrder.tcl fgo
 }
 
 foreach {module namespace} $modules {

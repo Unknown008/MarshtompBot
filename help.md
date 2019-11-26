@@ -17,7 +17,7 @@ Assign a channel for the bot to post new events. Channel is the discord channel 
 
  - **!setup _anime_ _channel_**
  
-   The bot will log new anime releases from www.gogoanime.to in this channel.
+   The bot will log new anime releases from nyaa.si in this channel.
    
 **!botstats**
 
