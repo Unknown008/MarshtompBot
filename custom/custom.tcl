@@ -18,7 +18,7 @@ if {![namespace exists meta]} {
 }
 
 namespace eval custom {
-    sqlite3 customdb "${scriptDir}/customdb.sqlite3"
+    sqlite3 customdb "${scriptDir}/custom/customdb.sqlite3"
     
     customdb eval {
         CREATE TABLE IF NOT EXISTS serebii(

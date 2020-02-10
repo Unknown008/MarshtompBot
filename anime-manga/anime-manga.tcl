@@ -17,7 +17,7 @@ if {![namespace exists meta]} {
 }
 
 namespace eval anime {
-    sqlite3 animedb "${scriptDir}/animedb.sqlite3"
+    sqlite3 animedb "${scriptDir}/anime-manga/animedb.sqlite3"
     animedb eval {
         CREATE TABLE IF NOT EXISTS animefavs(
             userId text,

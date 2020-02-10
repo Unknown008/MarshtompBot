@@ -2,7 +2,7 @@ namespace eval pogo {
     set silph(site)   "https://sil.ph/"
     set silph(listen) [list]
     
-    sqlite3 pogodb pogo.sqlite3
+    sqlite3 pogodb "$scriptDir/pogo/pogo.sqlite3"
     
     pogodb eval {
         CREATE TABLE IF NOT EXISTS pogo(

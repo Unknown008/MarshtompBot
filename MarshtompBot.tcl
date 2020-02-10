@@ -39,15 +39,15 @@ source "${scriptDir}/private.tcl"
 # https://stillwaters.page.link/marshtomp-beta-bot-invite
 
 ###### Custom stuff here ######
-source [file join $scriptDir meta.tcl]
+source [file join $scriptDir meta/meta.tcl]
 set modules {
-    custom.tcl                custom
-    pokedex.tcl               pokedex
-    pokebattle.tcl            pokebattle
-    stats.tcl                 stats
-    pogo.tcl                  pogo
-    anime-manga.tcl           anime
-    FateGO/FateGrandOrder.tcl fgo
+    custom/custom.tcl           custom
+    pokedex/pokedex.tcl         pokedex
+    pokebattle/pokebattle.tcl   pokebattle
+    stats/stats.tcl             stats
+    pogo/pogo.tcl               pogo
+    anime-manga/anime-manga.tcl anime
+    FateGO/FateGrandOrder.tcl   fgo
 }
 
 foreach {module namespace} $modules {
@@ -210,12 +210,10 @@ proc messageCreate { sessionNs event data } {
     }
 }
 
-proc ::mainCallbackHandler { sessionNs event data } {
+proc ::mainCallbackHandler {sessionNs event data} {
     ::meta::bump $event
-    #puts "$event\n$data\n"
-    switch $event {
+     switch $event {
         GUILD_CREATE {
-            #::guildCreate $sessionNs $event $data
             ::meta::build_logs
             after idle [list coroutine ::meta::update_members[::id] \
                 ::meta::update_members]
@@ -278,7 +276,9 @@ proc ::mainCallbackHandler { sessionNs event data } {
                     "presence"
         }
         GUILD_UPDATE -
-        GUILD_DELETE {}
+        GUILD_DELETE {
+            # handle guild delete
+        }
         GUILD_MEMBER_ADD -
         GUILD_MEMBER_REMOVE {
             set userId [dict get $data user id]

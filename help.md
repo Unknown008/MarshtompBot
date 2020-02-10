@@ -18,6 +18,10 @@ Assign a channel for the bot to post new events. Channel is the discord channel 
  - **!setup _anime_ _channel_**
  
    The bot will log new anime releases from nyaa.si in this channel.
+
+ - **!setup _serebii_ _channel_**
+ 
+   The bot will log daily news from serebii.net in this channel.
    
 **!botstats**
 
@@ -26,6 +30,10 @@ Displays some stats of the bot across all servers.
 **!help**
 
 Links to this page.
+
+**!about**
+
+Posts a few lines about the bot.
 
 # Moderation Commands
 
@@ -38,6 +46,10 @@ Bans a user from the bot's commands. **This does not ban the user from the serve
 
 Unbans a user from the bot's commands. **This does not ban the user from the server, you should do that through discord itself**. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
 
+**!delete _messageId_**
+
+Deletes the message with the corresponding message ID in this guild. Only users with the Manage Messages permissions can use this command.
+
 **!bulkdelete _number_**
 
 Deletes the past _number_ messages in the current channel. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command.
@@ -47,6 +59,16 @@ Deletes the past _number_ messages in the current channel. Only users with the A
 **!8ball _question_**
 
 Ask the Magic 8-Ball for advice. Questions should end with a question mark. Supported questions include 'where', 'who', 'when', 'why', 'how many/much' and 'yes/no' questions. 'what', 'how' and 'which' questions are not supported.
+
+**!whois _user_**
+
+Gives the information about a specific _user_. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+
+**!snowflake _snowflake_**
+
+Returns the datetimestamp of the snowflake.
+
+# Anime-Manga Commands
 
 **!subscribe _animename_ ?_-format from > to_?**
 
@@ -59,14 +81,6 @@ Removes subscription for an anime, or use 'all' to remove all subscriptions.
 **!viewsubs**
 
 Displays the user's current anime subscriptions.
-
-**!whois _user_**
-
-Gives the information about a specific _user_. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
-
-**!snowflake _snowflake_**
-
-Returns the datetimestamp of the snowflake.
 
 # Pokemon related commands
 

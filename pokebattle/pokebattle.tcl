@@ -16,13 +16,13 @@ if {![namespace exists meta]} {
     return
 }
 
-if {![file exists "pokedexdb"]} {
-    puts "Failed to load pokedex.tcl: Requires pokedexdb to be loaded."
+if {![namespace exists pokedex]} {
+    puts "Failed to load pokebattle.tcl: Requires pokedexdb to be loaded."
     return
 }
 
 namespace eval pokebattle {
-    sqlite3 pokedb "${scriptDir}/pokedb.sqlite3"
+    sqlite3 pokedb "${scriptDir}/pokebattle/pokedb.sqlite3"
     
     set afterIds            [list]
     

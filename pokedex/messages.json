@@ -1,0 +1,11 @@
+{
+    "getPokemon": "**Type:** %s\n**Abilities:** %s\n**Stats (HP/Atk/Def/SpA/SpD/Spd):** %s/%s/%s/%s/%s/%s (Total: %s)",
+    "getPokemonNext": "**Egg Group:** %s\n**EV yield (HP/Atk/Def/SpA/SpD/Spd):** %s/%s/%s/%s/%s/%s\n**Biometrics:** %s m, %s kg\n**Catch rate:** %s\n**Base Happiness:** %s\n**Gender ratio (M/F):** %s\n**Exp yield:** %s\n**Growth Rate:** %s\n**Max Exp:** %s",
+    "getRandomRegion": "Invalid region parameter. Must be in the format \"Kanto\" or \"Kanto|Johto|etc\"",
+    "getRandomFinal": "Invalid stage parameter. Must be 0 or 1",
+    "getRandomLegend": "Invalid legendary parameter. Must be 0 or 1",
+    "getMove": "**Type:** %s\n**Class:** %s\nPP: %s\n**Base Power:**%s\n**Accuracy:** %s\n**Priority:** %s\n**Description:** %s",
+    "getMoveFlags": "**Contact:** %s\n**Requires a charging turn:** %s\n**Requires recharge:** %s\n**Bypasses Detect/Protect:** %s\n**Reflectable:** %s\n**Snatchable:** %s**Copied by Mirror Move:** %s\n**Punch based:** %s\n**Sound based:** %s\n**Nullified by *Gravity*:** %s\n**Defrosts the user:** %s\n**Can hit/affect furthest Pokemon in triple battles:** %s\n**Heals:** %s\n**Bypasses *Substitute*:** %s"
+}
+
+

@@ -8,7 +8,7 @@
 # file.
 
 namespace eval meta {
-    sqlite3 metadb "${scriptDir}/metadb.sqlite3"
+    sqlite3 metadb "${scriptDir}/meta/metadb.sqlite3"
     metadb eval {
         CREATE TABLE IF NOT EXISTS banned(
             userId text
@@ -160,7 +160,7 @@ proc meta::command {data text channelId guildId userId} {
         }
         "!delete" {
             if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
+                [has_perm $userId {MANAGE_MESSAGES}]
                 || $userId == $::ownerId
             } {
                 deletedc [regsub {!delete *} $text {}] $channelId
@@ -383,7 +383,7 @@ proc meta::put_bot_stats {} {
 
 # meta::delete --
 #
-#   Deletes a message
+#   Deletes a message - WIP
 #
 # Arguments:
 #   msgId    The ID of the message to be deleted
@@ -397,6 +397,7 @@ proc meta::delete {msgId} {
         putdc [dict create content $msg] 0
         return
     }
+
 }
 
 # meta::bulk_delete --
