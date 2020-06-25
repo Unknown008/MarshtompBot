@@ -1,0 +1,58 @@
+{
+    "setupHelp": {
+        "syntax": "**!setup _type_ ?_value_?**",
+        "desc": "Sets up a specific configuration for the bot to a specified value. Depending on the type, the bot can make a channel configuration or overwrite a default configuration. Basic channel types include **log** and **announcements** while default configurations include **banexpiry** and **tablesize**. In case of a channel configuration, omitting the channel will configure the type to the channel the command was called. Use 'null' as value to unset a previously configured setting. Use **!setup help _type_** for help about a specific setup type.",
+        "synonyms": "set, chanset, guildset, serverset, config",
+        "example": "!setup log #server-logs",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "setupLogHelp": {
+        "syntax": "**!setup log ?_value_?**",
+        "desc": "Sets the specified value (channel highlight, id or channel name) as discord logs channel for the bot. Events that are logged include message edits and deletes, nickname changes, new users joining, users leaving the server, etc",
+        "synonyms": "_None_",
+        "example": "!setup log #server-logs",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "setupAnnouncementHelp": {
+        "syntax": "**!setup announcement _value_**",
+        "desc": "Sets the specified value (channel highlight, id or channel name) as announcement channel for the bot. The bot will post various things in this channels regarding updates to the bot, maintenance and downtimes among other things.",
+        "synonyms": "announcements",
+        "example": "!setup announcement #bot-announcements",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "setupTablesizeHelp": {
+        "syntax": "**!setup tablesize _value_**",
+        "desc": "Sets the default max tablesize. _value_ is an integer and must be at least 70. The bot typically uses codeblocks to post information in tabular format to discord, and the tablesize indicates the number of maximum characters on a single line. This maximum will be applied when at least one of the fields of the table is of type text (contains one or more sentences) and will apply word wrap to this field contents. The minimum column size for such a field however is set to 20.",
+        "synonyms": "_None_",
+        "example": "!setup tablesize 70",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "setupBanexpiryHelp": {
+        "syntax": "**!setup banexpiry _value_**",
+        "desc": "Sets the default ban duration. _value_ is a duration denoted in minutes, hours, days, etc. A duration of 1y2M3w4d5h6m7s means the duration is 1 year, 2 months, 3 weeks, 4 days, 5 hours, 6 minutes and 7 seconds. Only positive integers are accepted and the order of the different measures is from longest to shortest (i.e. years should be mentioned before seconds). Use 'permanent' or 'perm' to indicate an non-expiring ban. The default ban expiry is 4 weeks.",
+        "synonyms": "banduration",
+        "example": "!setup banexpiry 3w",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "banHelp": {
+        "syntax": "**!ban _user_ ?_duration_? ?_scope_? ?_reason_?**",
+        "desc": "Bans a user from the bot's commands. **This does not ban the user from the server, you should do that through discord itself**.\n- **user** can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).\n- **duration** is optional (by default, bans are permanent) and can be denoted in minutes, hours, days, etc. A duration of 1y2M3w4d5h6m7s will impose a ban of 1 year, 2 months, 3 weeks, 4 days, 5 hours, 6 minutes and 7 seconds. Only positive integers are accepted and the order of the different measures is from longest to shortest (i.e. years should be mentioned before seconds).\n- **scope** defines the scope of the ban. Can be either guild/server or bot. To ban at bot level, the user applying the ban must be a bot administrator.\n- **reason** is also optional and can be any text.",
+        "synonyms": "_None_",
+        "example": "!ban @BanMePlz 3y1M4w1d5h9m2s You just got banned",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "unbanHelp": {
+        "syntax": "**!unban _user_**",
+        "desc": "Unbans a user from the bot's commands. **This does not unban the user from the server, you should do that through discord itself**.\n- **user** can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).\nThis will not do anything if the user has no bans. If the user is banned at bot level, this only works if the user applying the unban is a bot administrator. If the user has both a ban at guild/server and at bot level in the guild/server the command is performed, then the guild/server unban takes priority.",
+        "synonyms": "_None_",
+        "example": "!unban @UnbanMePlz",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    },
+    "banInfoHelp": {
+        "syntax": "**!baninfo ?_user_? ?_scope_? ?_view_?**",
+        "desc": "Retrieves ban information from the bot.\n- **user** can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).\n **scope** defaults to _user_ and will display the specified user's ban information (the ban expiry date, the user who issued the ban, the reason, etc. The scope can also be _guild_, _server_ or _bot_. The former two are synonymous and will display a list of all the users in the current guild/server with information on each. _bot_ scope will list all users banned at bot level (a banned user does not have access to the bot's commands regardless of the guild/server they are in). Only a bot admin can use this scope.\n **view** is only useful when the scope is specified to be _guild_, _server_ or _bot_ and has the following syntax: `columnName:filter,order|columnName:filter,order|...|size:columnSize` where _field_ is the field name, _filter_ is optional and will show rows with only the specified value, _order_ is optional and will sort the rows according to this column data either in ascending or descending by specifying _asc_ or _desc_ respectively, and finally _columnSize_ is optional (defaults to 70 characters, the minimum, but can be any integer larger than 70) and indicates the maximum total length of a row in characters. It causes word wrapping in the ban reason column if the text would otherwise cause the row length to exceed this limit. If not specified, all the columns are displayed with no sorting. The minimum size of a column containing long text however is 20 characters.",
+        "synonyms": "_None_",
+        "example": "!baninfo guild user|date,asc|by:me|expiry|reason|size:70",
+        "required_permissions": "Administrator, Manage Channels, Manage Guild"
+    }
+}

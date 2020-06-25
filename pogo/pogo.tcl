@@ -25,11 +25,11 @@ proc pogo::command {} {
     upvar data data text text channelId channelId guildId guildId userId userId
     switch [lindex $text 0] {
         "!silphcard" {
-            showcard [regsub {!silphcard *} $text ""]
+            showcard [regsub {!silphcard *} $text {}]
         }
         "!set" {
             if {[lindex $text 1] eq "silph"} {
-                setsilph [regsub {!set silph *} $text ""]
+                setsilph [regsub {!set silph *} $text {}]
             } else {
                 return 0
             }
@@ -55,11 +55,11 @@ proc pogo::setsilph {username} {
     set res [pogodb eval {SELECT COUNT(*) FROM pogo WHERE id = :userId}]
     if {$res == 0} {
         pogodb eval {INSERT INTO pogo VALUES(:userId, :username)}
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
                 "Your account has successfully been linked!"] 0
     } else {
         pogodb eval {UPDATE pogo SET account = :username WHERE id = :userId}
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
                 "Your account has successfully been modified!"] 0
     }
 }
@@ -97,11 +97,11 @@ proc pogo::showcard {text} {
                 after 3000 {set silph(listen) ""}
                 set msg "It doesn't seem like you have linked your silph "
                 append msg "profile. Would you like to do it now?"
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
             } else {
                 set msg "It doesn't seem like this user has linked their silph "
                 append msg "profile."
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
             }
             return
         }
@@ -218,7 +218,7 @@ proc pogo::showcard {text} {
     }
     
     ::http::cleanup $token
-    ::meta::putdc $msg 0
+    ::meta::putGc $msg 0
 }
 
 proc pogo::getBadges {} {
@@ -247,7 +247,7 @@ proc pogo::getBadges {} {
     $out write a.png -format png
 }
 
-proc pogo::pre_rehash {} {
+proc pogo::pre_reboot {} {
     return
 }
 

@@ -2,7 +2,7 @@
 #
 #       This file implements the Tcl code for anime and manga commands
 #
-# Copyright (c) 2019, Jerry Yong
+# Copyright (c) 2019-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -22,7 +22,8 @@ namespace eval anime {
         CREATE TABLE IF NOT EXISTS animefavs(
             userId text,
             animeName text,
-            custom text
+            custom text,
+            categories text
         )
     }
     animedb eval {
@@ -54,10 +55,11 @@ proc anime::command {} {
     upvar data data text text channelId channelId guildId guildId userId userId
     switch [lindex $text 0] {
         "!subscribe" {
-            subscribe [regsub {!subscribe *} $text ""]
+            
+            subscribe [regsub {!subscribe *} $text {}]
         }
         "!unsubscribe" {
-            unsubscribe [regsub {!unsubscribe *} $text ""]
+            unsubscribe [regsub {!unsubscribe *} $text {}]
         }
         "!viewsubs" {
             viewsubs
@@ -78,20 +80,20 @@ proc anime::checksite {} {
     }
     set file [::http::data $token]
     ::http::cleanup $token
-    if {![regexp -- {<tbody>(.*?)</tbody>} $file - match]} {
+    if {![regexp {<tbody>(.*?)</tbody>} $file - match]} {
         after [expr {$anime(delay)*60*1000}] ::anime::checksite
         return
     }
-    set results [regexp -all -inline -- {<tr(?:.*?)>(.*?)</tr>} $match]
+    set results [regexp -all -inline {<tr(?:.*?)>(.*?)</tr>} $match]
     
     set new [list]
     foreach {main sub} $results {
-        set torrentInfo [regexp -all -inline -- {<td(?:.*?)>(.*?)</td>} $sub]
+        set torrentInfo [regexp -all -inline {<td(?:.*?)>(.*?)</td>} $sub]
         set colNo 0
         array set animeInfo {}
         foreach {col info} $torrentInfo {
             switch $colNo {
-                0 {regexp -- {title="([^\"]+)"} $info - animeInfo(category)}
+                0 {regexp {title="([^\"]+)"} $info - animeInfo(category)}
                 1 {
                     set s [regexp -all -inline \
                             {href="(.*?)".*? title="(.*?)"} $info]
@@ -101,7 +103,7 @@ proc anime::checksite {} {
                     }
                 }
                 2 {
-                    set links [regexp -all -inline -- {href="([^\"]+)"} $info]
+                    set links [regexp -all -inline {href="([^\"]+)"} $info]
                     lassign $links - animeInfo(torrent) - animeInfo(magnet)
                 }
                 3 {set animeInfo(size) $info}
@@ -161,7 +163,7 @@ proc anime::checksite {} {
                 metadb eval {
                     SELECT channelId FROM config WHERE type = 'anime'
                 } arr {
-                    ::meta::putdc [dict create embed $embed] 1 $arr(channelId)
+                    ::meta::putGc [dict create embed $embed] 1 $arr(channelId)
                 }
                 
                 animedb eval {SELECT * FROM animefavs} arr {
@@ -173,7 +175,7 @@ proc anime::checksite {} {
                         } {
                             regsub $f $link $t link
                         }
-                        coroutine ::meta::putdcPM[::id] ::meta::putdcPM \
+                        coroutine ::meta::putDm[::id] ::meta::putDm \
                                 $arr(userId) [dict create embed $embed] 1
                     }
                 }
@@ -211,11 +213,11 @@ proc anime::subscribe {animeName} {
         if {![regexp {(.+) > (.+)} $format - f t]} {
             set msg "Invalid format. The format should be like: "
             append msg "```css\nfrom > to```."
-            ::meta::putdc [dict create content $msg] 0
+            ::meta::putGc [dict create content $msg] 0
             return
         }
-        if {[catch {regsub $f "test" $t} err]} {
-        ::meta::putdc [dict create content \
+        if {[catch {regsub $f {test} $t} err]} {
+        ::meta::putGc [dict create content \
                 "Error with the regular expression: $err"] 0
         return
         }
@@ -239,7 +241,7 @@ proc anime::subscribe {animeName} {
         animedb eval {INSERT INTO animefavs VALUES(:userId, :name, :format)}
         set msg "You have been subscribed for $name!"
     }
-    ::meta::putdc [dict create content $msg] 1
+    ::meta::putGc [dict create content $msg] 1
 }
 
 proc anime::unsubscribe {animeName} {
@@ -263,7 +265,7 @@ proc anime::unsubscribe {animeName} {
         }
         set msg "You have been unsubscribed for $animeName!"
     }
-    ::meta::putdc [dict create content $msg] 1
+    ::meta::putGc [dict create content $msg] 1
 }
 
 proc anime::viewsubs {} {
@@ -284,10 +286,10 @@ proc anime::viewsubs {} {
         }
         append msg "```"
     }
-    ::meta::putdc [dict create content $msg] 1
+    ::meta::putGc [dict create content $msg] 1
 }
 
-proc anime::pre_rehash {} {
+proc anime::pre_reboot {} {
     variable afterIds
     foreach id $afterIds {
         after cancel $id

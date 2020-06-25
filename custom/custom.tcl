@@ -3,7 +3,7 @@
 #       This file implements the Tcl code for custom commands that don't fit in
 #       a specific category.
 #
-# Copyright (c) 2018, Jerry Yong
+# Copyright (c) 2018-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -55,20 +55,23 @@ proc custom::command {} {
     upvar data data text text channelId channelId guildId guildId userId userId
     variable say
     switch [lindex $text 0] {
+        "o/" {
+            if {$userId == $::ownerId} {wave $channelId}
+        }
         "!hp" {
-            hp_calc [regsub {!hp *} $text ""]
+            hp_calc [regsub {!hp *} $text {}]
         }
         "!8ball" {
-            ball $guildId [regsub {!8ball *} $text ""]
+            ball $guildId [regsub {!8ball *} $text {}]
         }
         "!whois" {
-            whois [regsub {!whois *} $text ""]
+            whois [regsub {!whois *} $text {}]
         }
         "!say" {
-            say {*}[regsub {!say *} $text ""]
+            say {*}[regsub {!say *} $text {}]
         }
         "!snowflake" {
-            snowflake [regsub {!snowflake *} $text ""]
+            snowflake [regsub {!snowflake *} $text {}]
         }
         default {
             if {$say(state) == 1} {return [say say $text]}
@@ -90,7 +93,7 @@ proc custom::say {type {text {}}} {
             set say(sourceId) $sourceId
             set say(targetId) $text
             set say(speaker)  $userId
-            ::meta::putdc [dict create content "Chat session started!"] 0
+            ::meta::putGc [dict create content "Chat session started!"] 0
         }
         say {
             if {$say(state) != 1} {return 0}
@@ -103,7 +106,7 @@ proc custom::say {type {text {}}} {
                 } else {
                     set msg $content
                 }
-                ::meta::putdc [dict create content $msg] 1 $say(targetId)
+                ::meta::putGc [dict create content $msg] 1 $say(targetId)
             } elseif {$sourceId == $say(targetId)} {
                 upvar guildId guildId
                 set attachment [dict get $text attachment]
@@ -115,7 +118,7 @@ proc custom::say {type {text {}}} {
                 } else {
                     set msg $content
                 }
-                ::meta::putdc [dict create content "$user: $msg"] 1 \
+                ::meta::putGc [dict create content "$user: $msg"] 1 \
                         $say(sourceId)
             }
             return 1
@@ -127,10 +130,10 @@ proc custom::say {type {text {}}} {
             set say(sourceId) 0
             set say(targetId) 0
             set say(speaker)  ""
-            ::meta::putdc [dict create content "Chat session ended!"] 0
+            ::meta::putGc [dict create content "Chat session ended!"] 0
         }
         default {
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                     "Usage: !say start|stop #channel"] 0
         }
     }
@@ -139,14 +142,14 @@ proc custom::say {type {text {}}} {
 proc custom::hp_calc {msg} {
     set elems [split $msg]
     if {[llength $elems] != 6} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "Invalid number of stats. Should be **HP Atk Def Spd SpA SpDef**." \
         ] 0
         return
     } elseif {![regexp {^\d+(?: \d+){5}$} $msg]} {
         set msg "Non-numerical values supplied. Please only provide numerical "
         append msg "values."
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return
     }
     
@@ -162,19 +165,19 @@ proc custom::hp_calc {msg} {
     set types [list Fighting Flying Poison Ground Rock Bug Ghost Steel Fire \
             Water Grass Electric Psychic Ice Dragon Dark]
     
-    ::meta::putdc [dict create content "**Type:** [lindex $types $resT]"] 0
+    ::meta::putGc [dict create content "**Type:** [lindex $types $resT]"] 0
 }
 
 proc custom::ball {guildId arg} {
     set usage "Ask a question a 'yes/no', 'where', 'who', 'when', 'why' or "
     append usage "'how much' question."
     if {$arg == ""} {
-        ::meta::putdc [dict create content "**8-ball** usage: $usage"] 0
+        ::meta::putGc [dict create content "**8-ball** usage: $usage"] 0
         return
     } elseif {![regexp {[?]} $arg match]} {
         set msg "**Error:** That's not a question! You are missing the question"
         append msg " mark!"
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return
     }
     switch -nocase -regexp -- $arg {
@@ -183,18 +186,18 @@ proc custom::ball {guildId arg} {
         "when" -
         "why" -
         "how (?:much|many)" {
-            ::meta::putdc \
+            ::meta::putGc \
                 [dict create content [throw_ball $guildId $arg]] 1
         }
         "what" -
         "how" -
         "which" {
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                 "**8-ball**: Sorry, I can't answer such questions. $usage" \
             ] 1
         }
         default {
-            ::meta::putdc \
+            ::meta::putGc \
                     [dict create content [throw_ball $guildId yesno]] 0
         }
     }
@@ -323,7 +326,7 @@ proc custom::whois {text} {
     
     if {[regexp {^<@!?([0-9]+)>$} $text - user]} {
         set data [lsearch -inline $members "*$user*"]
-    } elseif {[string tolower $text] == "me"} {
+    } elseif {[string tolower $text] in {"me" ""}} {
         set data [lsearch -inline -regexp $members "\\y$userId\\y"]
         set text "<@$userId>"
     } else {
@@ -331,7 +334,7 @@ proc custom::whois {text} {
     }
     
     if {$data == ""} {
-        ::meta::putdc [dict create content "No such user found."] 0
+        ::meta::putGc [dict create content "No such user found."] 0
     } else {
         set username [dict get $data user username]
         set id [dict get $data user id]
@@ -363,7 +366,7 @@ proc custom::whois {text} {
         }] -format "%a %d %b %Y %T UTC" -timezone UTC]
         set desc "$text is $username\nCreated on $datecreated\nRole(s): $roles\n"
         set footer "$username is a member of the server since $joined_at"
-        ::meta::putdc [dict create embed \
+        ::meta::putGc [dict create embed \
             [dict create \
                 title $type \
                 description $desc \
@@ -375,7 +378,7 @@ proc custom::whois {text} {
 }
 
 proc custom::wave {channelId} {
-    ::meta::putdc [dict create content "\\o"] 0 $channelId
+    ::meta::putGc [dict create content "\\o"] 0 $channelId
 }
 
 proc custom::checknews {} {
@@ -397,7 +400,7 @@ proc custom::checknews {} {
     ::http::cleanup $token
     set re {<div class="post">((?:<div(?:(?!</div>).)+</div>|(?!</div>).)+)}
     append re {</div>}
-    set posts [regexp -inline -all -- $re $file]
+    set posts [regexp -inline -all $re $file]
     
     if {$posts == ""} {
         after [expr {$scrapper(delay)*60*1000}] ::custom::checknews
@@ -409,9 +412,9 @@ proc custom::checknews {} {
     set now [clock scan now]
     set first [customdb eval {SELECT 1 FROM serebii LIMIT 1}]
     foreach {m post} $posts {
-        regexp -- {<a href[^>]* id="([^\"]+)"[^>]*>} $post - id
+        regexp {<a href[^>]* id="([^\"]+)"[^>]*>} $post - id
         set re {<p class="title"[^>]*?>([^<]*?)</p>\s*?<p>(.*?)</p>}
-        set matches [regexp -inline -all -- $re $post]
+        set matches [regexp -inline -all $re $post]
         set articles [dict create]
         foreach {m title text} $matches {
             if {[dict exists $articles $title]} {
@@ -502,7 +505,7 @@ proc custom::checknews {} {
                 INSERT INTO serebiimsgs
                 VALUES (:arr(channelId), :title, '', :now)
             }
-            coroutine ::meta::putdc[::id] ::meta::putdc \
+            coroutine ::meta::putGc[::id] ::meta::putGc \
                     [dict create embed $news] 0 $arr(channelId) [list {*}$cmds]
         }
         foreach edits $ledits {
@@ -513,7 +516,7 @@ proc custom::checknews {} {
                 AND id = :id
                 AND msgId <> ''
             } barr {
-                ::meta::editdc [dict create embed $edits] 0 $barr(msgId) \
+                ::meta::editGc [dict create embed $edits] 0 $barr(msgId) \
                         $arr(channelId)
             }
         }
@@ -548,7 +551,7 @@ proc custom::newsUpdate {id args} {
 
 proc custom::htmlCleanup {text} {
     # Replace newlines
-    regsub -all {<[^>]*br[^>]*>} $text "\n" text
+    regsub -all {<[^>]*br[^>]*>} $text {\n} text
     
     # Replace formatting
     # Underline
@@ -578,12 +581,12 @@ proc custom::urlCleanup {text url} {
 }
 
 proc custom::snowflake {text} {
-    ::meta::putdc [dict create content [clock format [expr {
+    ::meta::putGc [dict create content [clock format [expr {
             [getSnowflakeUnixTime $text $::discord::Epoch]/1000
         }] -format "%a %d %b %Y %T UTC" -timezone UTC]] 0
 }
 
-proc custom::pre_rehash {} {
+proc custom::pre_reboot {} {
     variable afterIds
     foreach id $afterIds {
         after cancel $id

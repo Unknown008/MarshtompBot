@@ -1,0 +1,74 @@
+// To untrack this file use the following command before editing:
+// git update-index --assume-unchanged private.tcl
+
+{
+    // The bot will recognise this user id as the 'admin' and enable 
+    // availability of all existing commands.
+    "owner_id": 000000000000000000,
+
+    // The token for the bot, you request one at 
+    // https://discord.com/developers/applications/
+    "token": "",
+
+    // Those are modules that you can import in the bot.
+    // path is the relative path of the module script to the bot script
+    // module_name is the name of the module (read their readme)
+    "modules": [
+        // {
+        //     "path": "path/to_file.tcl",
+        //     "module_name": "moduleName"
+        // },
+        // {
+        //     "path": "custom/custom.tcl",
+        //     "module_name": "custom"
+        // },
+        // {
+        //     "path": "pokedex/pokedex.tcl",
+        //     "module_name": "pokedex"
+        // },
+        // {
+        //     "path": "pokebattle/pokebattle.tcl",
+        //     "module_name": "pokebattle"
+        // },
+        // {
+        //     "path": "stats/stats.tcl",
+        //     "module_name": "stats"
+        // },
+        // {
+        //     "path": "pogo/pogo.tcl",
+        //     "module_name": "pogo"
+        // },
+        // {
+        //     "path": "anime-manga/anime-manga.tcl",
+        //     "module_name": "anime"
+        // },
+        // {
+        //     "path": "FateGO/FateGrandOrder.tcl",
+        //     "module_name": "fgo"
+        // }
+    ],
+    
+    // Valid levels debug, info, notice, warn, error, critical, alert, emergency
+    // Enables logging at or above the level set and disables levels below
+    // (order of levels have been listed in increasing level e.g. setting a log
+    // level of warn will log everything from warn to emergency level 
+    // invclusive and not log anything from debug to notice inclusive).
+    "log_level": "debug",
+
+    // Enables or disables logging of websocket events.
+    "log_websocket": true,
+
+    // Similar to logLevel setting, except this one is specifically for 
+    // websocket events.
+    "websocket_log_level": "debug",
+
+    // Size (in mega bytes) at which the logger stops logging messages to the 
+    // same file and creates a new one to log messages.
+    "max_log_size": "4",
+
+    // This is the owner tag. There are error messages sent to discord that will
+    // tell users to contact this user for issues. This is my own tag, change it
+    // to yours if you know how to resolve the issue yourself and let others 
+    // contact you.
+    "owner_tag": "Unknown008#4135"
+}

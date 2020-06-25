@@ -1,0 +1,43 @@
+{
+    "addServantHelp": "Usage (all parameters must be provided; if the servant does not have skills unlocked, provide them at level 1):\n$fgo(cmd)servant add _servantName|servantId_ _servantLvl_ _servantAscension_ _servantSkill1Lvl_ _servantSkill2Lvl_ _servantSkill3Lvl_\nOr in any parameter order:\n$fgo(cmd)servant add -name _servantName_|-id _servantId_ -level _servantLvl_ -ascension _servantAscension_ -skill1 _servantSkill1Lvl_ -skill2 _servantSkill2Lvl_ -skill3 _servantSkill3Lvl_",
+    "addServantError": "Wrong number of parameters or invalid parameters. Usage (all parameters must be provided; if the servant does not have skills unlocked, provide them at level 1):\n$fgo(cmd)servant add _servantName|servantId_ _servantLvl_ _servantAscension_ _servantSkill1Lvl_ _servantSkill2Lvl_ _servantSkill3Lvl_\nOr in any parameter order:\n$fgo(cmd)servant add -name _servantName_|-id _servantId_ -level _servantLvl_ -ascension _servantAscension_ -skill1 _servantSkill1Lvl_ -skill2 _servantSkill2Lvl_ -skill3 _servantSkill3Lvl_",
+    "addServantUrlError": "Could not read from the website specified.",
+    "addServantSuccess": "Your servant was successfully added and/or updated.",
+    "addServantSuccessCreated": "Your servant was successfully added and/or updated. An account for you has automatically been created with the servants you have created since it is your first time registering a servant. Should you wish to delete it, you can use `!fgodelete` to remove all your information saved. If you also want others to see your account, you can turn your account visibility settings on (off by default) by using `!fgoshare on`.",
+
+    "servantNameNotFound": "No servants named $param found. If you believe this servant exists, contact $::ownerTag or create an issue on $fgo(gitIssue).",
+    "servantIdNotFound": "No servants with ID $param found. If you believe this servant exists, contact $::ownerTag or create an issue on $fgo(gitIssue).",
+    "multipleServantFound": "More than one servant were matched. Please use the command again with the appropriate ID instead:\n[join $results \n]",
+    "servantidMissing": "Servant ID or Name is missing",
+    "servantasMissing": "Servant Ascension Level is missing",
+    "servantlvMissing": "Servant Level is missing",
+    "servants1Missing": "Servant Skill1 Level is missing",
+    "invalidLevel": "The provided servant level is invalid. It should be a number ranging between 1 and 100 inclusive.",
+    "invalidAscension": "The provided servant ascension level is invalid. It should be a number ranging between 0 and 4 inclusive.",
+    "invalidSkillLevel": "The provided servant skill level is invalid. It should be a number ranging between 1 and 10 inclusive.",
+
+    "materialNotRegisted": "You are not registered. Add at least one servant to register yourself (use `!fgoadd` to add a servant).",
+    "materialNoServants": "You have no servants. You need at least one servant to use this command (use `!fgoadd` to add a servant).",
+    "materialNoMatch": "You have no servants matching the query criteria.",
+    "rarityFilter": "Invalid or missing star/rarity filter value. Should be a number between 1 and 5 inclusive. Can be preceded by `<=` or `>=` (e.g. `-star >=4`).",
+    "classFilter": "Invalid or missing class. Valid classes include [join $results {, }].",
+    "nameFilter": "Invalid or missing servant name.",
+    "levelFilter": "Invalid or missing servant level.",
+
+    "sharingAlreadyOn": "Your account's sharing setting is already on!",
+    "sharingAlreadyOff": "Your account's sharing setting is already off!",
+    "sharingTurnedOn": "Account profile share setting turned on.",
+    "sharingTurnedOff": "Account profile share setting turned off.",
+    "sharingNoAccount": "You do not have a registered account!",
+    "sharingHelp": "Unrecognised parameter. Usage **!fgoshare _on|off_**",
+
+    "profileNotImplemented": "Sorry this has not been implemented yet.",
+    "profileUnrecognized": "Unrecognised parameter. Usage **!fgoprofile _view|edit|delete|search_**. Use **!fgoprofile _cmd_ help** to get specific help about a specific command",
+    "profileNotRegistered": "You don't seem to have an FGO profile registered. An FGO profile gets automatically created when you add a servant using **!fgoservant add**.",
+    "profileNotFound": "No such user found or the user has their profile visibility turned off.",
+    "profileTagNotFound": "No user matching the provided tag found in my database or the user has their profile visibility turned off.",
+    "profileHelp": "Usage **!fgoprofile view ?me|@user|user#1234?** to view your or someone else's profile (Note: You can only view someone else's profile if they have the sharing setting set to on).",
+    "profileDeleted": "Your profile has been deleted as requested.",
+    "profileDeleteTimeout": "Operation timeout. Deletion of your profile has been cancelled.",
+    "profileDeleteCancelled": "Deletion of your profile has been cancelled as requested."
+}

@@ -3,7 +3,7 @@
 #       This file implements the Tcl code for Pokemon Battle simulator for
 #       discord
 #
-# Copyright (c) 2018, Jerry Yong
+# Copyright (c) 2018-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -140,29 +140,29 @@ proc pokebattle::command {} {
     switch [lindex $text 0] {
         "!challenge" {
             if {
-                ![::meta::has_perm [dict get \
+                ![::meta::hasPerm [dict get \
                         [set ${::session}::self] id] {MANAGE_CHANNELS}]
             } {
                 set msg "Sorry, I don't have the permissions on this server to "
                 append msg "manage channels. I cannot host a $battle(title)."
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             }
-            challenge [regsub {!challenge *} $text ""]
+            challenge [regsub {!challenge *} $text {}]
         }
-        "!accept" {accept [regsub {!accept *} $text ""]}
-        "!decline" {decline [regsub {!decline *} $text ""]}
+        "!accept" {accept [regsub {!accept *} $text {}]}
+        "!decline" {decline [regsub {!decline *} $text {}]}
         "!surrender" -
         "!forfeit" {forfeit $guildId $channelId $userId}
         "!ppause" {pause $guildId $channelId $userId}
         "!presume" {resume $guildId $channelId $userId}
         
         "!pokebattleset" {
-            if {![::meta::has_perm $userId {ADMINISTRATOR MANAGE_GUILD}]} {
+            if {![::meta::hasPerm $userId {ADMINISTRATOR MANAGE_GUILD}]} {
                 return
             }
             settings $guildId $channelId $userId \
-                    {*}[regsub {!pokebattleset } $text ""]
+                    {*}[regsub {!pokebattleset } $text {}]
 
         }
         default {
@@ -227,7 +227,7 @@ proc pokebattle::challenge {text} {
             if {$channelId != $exists} {
                 set msg "Please use <#exists> to create a $battle(title) "
                 append msg "challenge."
-                ::meta::putdc [dict create content $msg] 1
+                ::meta::putGc [dict create content $msg] 1
                 return
             }
         } else {
@@ -303,7 +303,7 @@ proc pokebattle::challenge {text} {
         if {$text eq "help"} {
             set msg "Instructions for $battle(title) can be found here: "
             append msg $battle(help)
-            ::meta::putdc [dict create content $msg] 0
+            ::meta::putGc [dict create content $msg] 0
             return
         }
         
@@ -312,7 +312,7 @@ proc pokebattle::challenge {text} {
             regexp {[0-9]+} [lsearch -inline $room "&*"] room
             if {$room == ""} {
                 set msg "You do not have any pending challenges!"
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             }
             set cmd \
@@ -324,7 +324,7 @@ proc pokebattle::challenge {text} {
             set msg "Are you sure you want to remove your current challenge? "
             append msg "(Y/N)"
             incr ::listener
-            ::meta::putdc [dict create content $msg] 0
+            ::meta::putGc [dict create content $msg] 0
             return
         }
         
@@ -332,14 +332,14 @@ proc pokebattle::challenge {text} {
         if {$gen != "" && $gen >= 8} {
             set msg "Error: Unsupported generation. Generations supported range"
             append msg " from 1 to $battle(gen)."
-            ::meta::putdc [dict create content $msg] 0
+            ::meta::putGc [dict create content $msg] 0
             return
         }
         
-        set targetId [::meta::get_user_id $guildId $text]
+        set targetId [::meta::getUserId $guildId $text]
         if {$targetId == ""} {
             set msg "This user could not be found or too many users were matched"
-            ::meta::putdc [dict create content $msg] 0
+            ::meta::putGc [dict create content $msg] 0
             return
         }
     }
@@ -458,7 +458,7 @@ proc pokebattle::challenge {text} {
             append msg "[expr {$battle(jointimeout)/1000}] seconds."
         }
     }
-    ::meta::putdc [dict create content $msg] 0 $channelId
+    ::meta::putGc [dict create content $msg] 0 $channelId
 }
 
 proc pokebattle::accept {text} {
@@ -481,18 +481,18 @@ proc pokebattle::accept {text} {
             
             if {[lsearch -not $rooms {[&^]*}] > -1} {
                 set msg "You are already in a battle!"
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             } elseif {[llength [lsearch -all $rooms {^*}]] == 1} {
                 set roomId [string map {^ &} [lsearch -inline $rooms {^*}]]
             } elseif {[llength [lsearch -all $rooms {^*}]] > 1} {
                 set msg "There are multiple pending challenges. Please specify "
                 append msg "which one you are accepting (use `!accept @user`)."
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             } elseif {[lsearch $rooms {&*}] > -1} {
                 set msg "You cannot accept your own challenge!"
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             }
         } else {
@@ -509,13 +509,13 @@ proc pokebattle::accept {text} {
             if {[llength $unique] > 1} {
                 set msg "There are multiple pending challenges. Please specify "
                 append msg "which one you are accepting (use `!accept @user`)."
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             } elseif {[llength $unique] == 1} {
                 set roomId [lindex $unique 0]
             } else {
                 set msg "There are no free pending challenge requests."
-                ::meta::putdc [dict create content $msg] 0
+                ::meta::putGc [dict create content $msg] 0
                 return
             }
         }
@@ -528,7 +528,7 @@ proc pokebattle::accept {text} {
             }
         }
         if {!$found} {
-            ::meta::putdc [dicr create content "Oops, something went wrong."] 0
+            ::meta::putGc [dicr create content "Oops, something went wrong."] 0
             return
         }
         set room [string range $roomId 1 end]
@@ -544,7 +544,7 @@ proc pokebattle::accept {text} {
         dict set battle(sessions) $room playerlist $playerlist
         
         set msg "<@$userId> has accepted <@targetId>'s challenge!"
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         
         start_battle $guildId $channelId [lindex $playerlist 0]
     } else {
@@ -566,7 +566,7 @@ proc pokebattle::decline {text} {
     }
     
     if {[dict exists $battle(sessionMap) $guildId $userId]} {
-        ::meta::putdc \
+        ::meta::putGc \
             [dict create content "You cannot decline your own challenge!"] 0
         return
     }
@@ -574,7 +574,7 @@ proc pokebattle::decline {text} {
     dict unset battle(sessions) $room
     dict unset battle(sessionMap) $guildId $userId
     
-    ::meta::putdc \
+    ::meta::putGc \
             [dict create content "<@$userId> has declined the challenge!"] 0
 }
 
@@ -691,7 +691,7 @@ proc pokebattle::resume {guildId channelId userId} {
         } {
             set msg "Only the player who paused the game can resume the game, "
             append msg "unless the that player is offline."
-            ::meta::putdc [dict create content $msg] 0 $channelId
+            ::meta::putGc [dict create content $msg] 0 $channelId
             return
         } elseif {$userId ni [dict get $battle(sessions) $room playerlist]} {
             return
@@ -730,7 +730,7 @@ proc pokebattle::start_battle {guildId channelId userId} {}
 ##
 proc pokebattle::announce {room msg} {
     variable battle
-    ::meta::putdc [dict create content $msg] 0 \
+    ::meta::putGc [dict create content $msg] 0 \
         [dict get $battle(sessions) $room chan]
     foreach player [dict get $battle(sessions) $room players] {
         private_say [dict get $player chan] [dict get $player trainer] $msg
@@ -740,9 +740,9 @@ proc pokebattle::announce {room msg} {
 proc pokebattle::private_say {channelId userId msg} {
     variable battle
     if {$channelId == "DM"} {
-        ::meta::putdcPM $userId [dict create content $msg] 0
+        ::meta::putDm $userId [dict create content $msg] 0
     } elseif {$channelId != ""} {
-        ::meta::putdc [dict create content $msg] 0 $channelId
+        ::meta::putGc [dict create content $msg] 0 $channelId
     }
 }
 
@@ -858,7 +858,7 @@ proc pokebattle::settings {guildId channelId userId args} {
                 } elseif {[string is false -strict $value]} {
                     disable_guild $guildId $channelId $userId
                 } else {
-                    ::meta::putdc [dict create content $msg] 0
+                    ::meta::putGc [dict create content $msg] 0
                 }
             }
             channel {
@@ -869,7 +869,7 @@ proc pokebattle::settings {guildId channelId userId args} {
                 } elseif {[string is false -strict $value]} {
                     disable_channel $guildId $channelId $userId $channels
                 } else {
-                    ::meta::putdc [dict create content $msg] 0
+                    ::meta::putGc [dict create content $msg] 0
                 }
             }
             ban {
@@ -880,7 +880,7 @@ proc pokebattle::settings {guildId channelId userId args} {
                 } elseif {[string is false -strict $value]} {
                     unban_user $guildId $channelId $userId $users
                 } else {
-                    ::meta::putdc [dict create content $msg] 0
+                    ::meta::putGc [dict create content $msg] 0
                 }
             }
             category {
@@ -902,7 +902,7 @@ proc pokebattle::ban_user {guildId channelId userId targets} {
         if {[regexp {^<@!?([0-9]+)>$} $target - user]} {
             set targetId $user
         } elseif {$target == ""} {
-            ::meta::putdc \
+            ::meta::putGc \
                 [dict create content "Error: User to ban was not mentioned."] 0
             return
         } else {
@@ -912,7 +912,7 @@ proc pokebattle::ban_user {guildId channelId userId targets} {
             set members [dict get $guildData members]
             set data [lsearch -inline -nocase $members "*$target*"]
             if {$data == ""} {
-                ::meta::putdc [dict create content "No such user found."] 0
+                ::meta::putGc [dict create content "No such user found."] 0
                 return
             } else {
                 set targetId [dict get $data user id]
@@ -923,7 +923,7 @@ proc pokebattle::ban_user {guildId channelId userId targets} {
             SELECT value FROM config WHERE param = 'bannedUsers'
         }]
         if {$targetId in $banned} {
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                 "<@$targetId> is already banned from $battle(title)."] 0
         } else {
             lappend banned $targetId
@@ -935,10 +935,10 @@ proc pokebattle::ban_user {guildId channelId userId targets} {
         }
     }
     if {[llength $banned] == 1} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "[join banned] has been banned from $battle(title)."] 0
     } elseif {[llength $banned] > 1} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "[join banned {, }] have been banned from $battle(title)."] 0
     }
 }
@@ -950,7 +950,7 @@ proc pokebattle::unban_user {guildId channelId userId targets} {
         if {[regexp {^<@!?([0-9]+)>$} $target - user]} {
             set targetId $user
         } elseif {$target == ""} {
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                 "Error: User to ban was not mentioned."] 0
             return
         } else {
@@ -960,7 +960,7 @@ proc pokebattle::unban_user {guildId channelId userId targets} {
             set members [dict get $guildData members]
             set data [lsearch -inline -nocase $members "*$target*"]
             if {$data == ""} {
-                ::meta::putdc [dict create content "No such user found."] 0
+                ::meta::putGc [dict create content "No such user found."] 0
                 return
             } else {
                 set targetId [dict get $data user id]
@@ -972,7 +972,7 @@ proc pokebattle::unban_user {guildId channelId userId targets} {
         }]
         set idx [lsearch $banned $targetId]
         if {$idx == -1} {
-            ::meta::putdc [dict create content "<@$targetId> is not banned."] 0
+            ::meta::putGc [dict create content "<@$targetId> is not banned."] 0
         } else {
             set banned [lreplace $banned $idx $idx]
             pokedb eval {
@@ -982,10 +982,10 @@ proc pokebattle::unban_user {guildId channelId userId targets} {
         }
     }
     if {[llength $unbanned] == 1} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "[join unbanned] has been unbanned from $battle(title)."] 0
     } elseif {[llength $banned] > 1} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "[join unbanned {, }] have been unbanned from $battle(title)."] 0
     }
 }
@@ -1000,7 +1000,7 @@ proc pokebattle::disable_guild {guildId channelId userId} {
         UPDATE config SET value = :guilds WHERE param = 'disabledGuilds'
     }
     
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
         "$battle(title) has been disabled on this server."] 0
     kill_game $guildId $channelId $userId 0 "Y"
 }
@@ -1012,14 +1012,14 @@ proc pokebattle::enable_guild {guildId channelId userId} {
     }]
     set idx [lsearch $guilds $guildId]
     if {$idx == -1} {
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "$battle(title) is already enabled on this server."] 0
     } else {
         set guilds [lreplace $guilds $idx $idx]
         pokedb eval {
             UPDATE config SET value = :guilds WHERE param = 'disabledGuilds'
         }
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "$battle(title) has been enabled on this server."] 0
     }
 }
@@ -1034,7 +1034,7 @@ proc pokebattle::disable_channel {guildId channelId userId {others ""}} {
         pokedb eval {
             UPDATE config SET value = :chans WHERE param = 'disabledChans'
         }
-        ::meta::putdc [dict create content \
+        ::meta::putGc [dict create content \
             "War of the Seas has been disabled on this channel."] 0
     } else {
         set done [list]
@@ -1066,7 +1066,7 @@ proc pokebattle::disable_channel {guildId channelId userId {others ""}} {
             append msg "disabled: [join $skip {, }]"
             lappend parts $msg
         }
-        ::meta::putdc [dict create content [join $parts "\n"]] 0
+        ::meta::putGc [dict create content [join $parts "\n"]] 0
     }
 }
 
@@ -1078,14 +1078,14 @@ proc pokebattle::enable_channel {guildId channelId userId {others ""}} {
     if {$others == ""} {
         set idx [lsearch $chans $channelId]
         if {$idx == -1} {
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                 "$battle(title) is already enabled on this channel."] 0
         } else {
             set chans [lreplace $chans $idx $idx]
             pokedb eval {
                 UPDATE config SET value = :chans WHERE param = 'disabledChans'
             }
-            ::meta::putdc [dict create content \
+            ::meta::putGc [dict create content \
                 "$battle(title) has been enabled on this channel."] 0
         }
     } else {
@@ -1119,7 +1119,7 @@ proc pokebattle::enable_channel {guildId channelId userId {others ""}} {
             append msg " [join $skip {, }]"
             lappend parts $msg
         }
-        ::meta::putdc [dict create content [join $parts "\n"]] 0
+        ::meta::putGc [dict create content [join $parts "\n"]] 0
     }
 }
 
@@ -1128,7 +1128,7 @@ proc pokebattle::default_category {guildId channelId userId category} {
     set cDefault [pokedb eval {
         SELECT category FROM preferences WHERE guildId = :guildId
     }]
-    set newcategory [::meta::channame_clean $category]
+    set newcategory [::util::cleanChanName $category]
     
     if {$cDefault == ""} {
         pokedb eval {
@@ -1148,7 +1148,7 @@ proc pokebattle::default_category {guildId channelId userId category} {
         } else {
             append msg "."
         }
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return
     }
     set msg "Default category name for $battle(title) successfully set!"
@@ -1158,7 +1158,7 @@ proc pokebattle::default_category {guildId channelId userId category} {
         append msg "underscores and dashes allowed), however. The new category "
         append msg "name is $newcategory"
     }
-    ::meta::putdc [dict create content $msg] 0
+    ::meta::putGc [dict create content $msg] 0
 }
 
 proc pokebattle::default_channel {guildId channelId userId channels} {
@@ -1166,7 +1166,7 @@ proc pokebattle::default_channel {guildId channelId userId channels} {
     set cDefault [pokedb eval {
         SELECT channel FROM preferences WHERE guildId = :guildId
     }]
-    set newchannels [lmap x $channels {::meta::channame_clean $x}]
+    set newchannels [lmap x $channels {::util::cleanChanName $x}]
     if {$cDefault == ""} {
         pokedb eval {
             INSERT INTO preferences VALUES (:guildId, '', '', :newchannels, '')
@@ -1188,7 +1188,7 @@ proc pokebattle::default_channel {guildId channelId userId channels} {
         } else {
             append msg "."
         }
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return
     }
     
@@ -1198,16 +1198,16 @@ proc pokebattle::default_channel {guildId channelId userId channels} {
         append msg "on channel names (only lowercase alphanumeric characters, "
         append msg "underscores and dashes allowed)."
     }
-    ::meta::putdc [dict create content $msg] 0
+    ::meta::putGc [dict create content $msg] 0
 }
 
-proc pokebattle::pre_rehash {} {
+proc pokebattle::pre_reboot {} {
     variable afterIds
     foreach id $afterIds {
         after cancel $id
     }
     
-    # Message running battles that there is an ongoing rehash
+    # Message running battles that there is an ongoing reboot
 }
 
 puts "pokebattle.tcl v0.1 loaded"

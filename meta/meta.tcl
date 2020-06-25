@@ -2,115 +2,101 @@
 #
 #       This file handles the essential procedures for a discord bot.
 #
-# Copyright (c) 2018, Jerry Yong
+# Copyright (c) 2018-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
 
+package require sqlite3
+package require http
+package require json
+
 namespace eval meta {
     sqlite3 metadb "${scriptDir}/meta/metadb.sqlite3"
-    metadb eval {
-        CREATE TABLE IF NOT EXISTS banned(
-            userId text
-        )
-    }
-    metadb eval {
-        CREATE TABLE IF NOT EXISTS config(
-            guildId text,
-            type text,
-            channelId text
-        )
-    }
-    
-    set botstats(order) {
-        UPTIME RESUMED READY CHANNEL_CREATE CHANNEL_UPDATE CHANNEL_DELETE
-        GUILD_CREATE GUILD_UPDATE GUILD_DELETE GUILD_BAN_ADD GUILD_BAN_REMOVE
-        GUILD_MEMBER_ADD GUILD_MEMBER_REMOVE GUILD_MEMBER_UPDATE 
-        GUILD_EMOJI_UPDATE GUILD_INTEGRATIONS_UPDATE GUILD_ROLE_CREATE 
-        GUILD_ROLE_UPDATE GUILD_ROLE_DELETE MESSAGE_CREATE MESSAGE_UPDATE 
-        MESSAGE_DELETE MESSAGE_DELETE_BULK PRESENCE_UPDATE TYPING_START 
-        USER_UPDATE MESSAGE_REACTION_ADD MESSAGE_REACTION_REMOVE 
-        CHANNEL_PINS_UPDATE PRESENCES_REPLACE MESSAGE_ACK CHANNEL_PINS_ACK 
-        CHANNEL_PINS_UPDATE PRESENCES_REPLACE   
-    }
-    set botstats(UPTIME)                    [clock seconds]
-    set botstats(READY)                     0
-    set botstats(RESUMED)                   0
-    set botstats(CHANNEL_CREATE)            0
-    set botstats(CHANNEL_UPDATE)            0
-    set botstats(CHANNEL_DELETE)            0
-    set botstats(GUILD_CREATE)              0
-    set botstats(GUILD_UPDATE)              0
-    set botstats(GUILD_DELETE)              0
-    set botstats(GUILD_BAN_ADD)             0
-    set botstats(GUILD_BAN_REMOVE)          0
-    set botstats(GUILD_MEMBER_ADD)          0
-    set botstats(GUILD_MEMBER_REMOVE)       0
-    set botstats(GUILD_MEMBER_UPDATE)       0
-    set botstats(GUILD_EMOJI_UPDATE)        0
-    set botstats(GUILD_INTEGRATIONS_UPDATE) 0
-    set botstats(GUILD_ROLE_CREATE)         0
-    set botstats(GUILD_ROLE_UPDATE)         0
-    set botstats(GUILD_ROLE_DELETE)         0
-    set botstats(MESSAGE_CREATE)            0
-    set botstats(MESSAGE_UPDATE)            0
-    set botstats(MESSAGE_DELETE)            0
-    set botstats(MESSAGE_DELETE_BULK)       0
-    set botstats(PRESENCE_UPDATE)           0
-    set botstats(TYPING_START)              0
-    set botstats(USER_UPDATE)               0
-    set botstats(MESSAGE_REACTION_ADD)      0
-    set botstats(MESSAGE_REACTION_REMOVE)   0
-    set botstats(CHANNEL_PINS_UPDATE)       0
-    set botstats(PRESENCES_REPLACE)         0
-    set botstats(MESSAGE_ACK)               0
-    set botstats(CHANNEL_PINS_ACK)          0
-    set botstats(CHANNEL_PINS_UPDATE)       0
-    set botstats(PRESENCES_REPLACE)         0
-    
-    set localLimits {}
-}
 
-# meta::build_logs --
-#
-#   Creates chatlog tables for each guild the bot is present in if they do
-#   not exist yet
-#
-# Arguments:
-#   guildId  (optional) If provided, attempts to create one table named 
-#            chatlog_$guildId. If not provided, will attempt to create a table
-#            for each guild the bot is in.
-#
-# Results:
-#   None
+    set botstats(order) [list UPTIME {*}[lmap x $::discord::defCallbacks {
+        lindex x 0
+    }]]
+    foreach stat $botstats(order) {
+        set botstats($stat) [expr {$stat eq "UPTIME" ? [clock seconds] : 0}]
+    }
 
-proc meta::build_logs {{guildId {}}} {
-    if {$guildId == ""} {
-        set guilds [guild eval {SELECT * FROM guild}]
-        foreach {guildId data} $guilds {
-            metadb eval "
-                CREATE TABLE IF NOT EXISTS chatlog_${guildId}(
-                    msgId text,
-                    userId text,
-                    content text,
-                    embed text,
-                    attachment text,
-                    pinned text
-                )
-            "
+    variable meta
+    set meta(ver)     "0.2"
+    set meta(message) [file join ${::scriptDir} "meta" "messages.json"]
+
+    # Rate limits for API requests
+    variable localLimits {}
+
+    # Commands made to be made visible to global via channel commands
+    set publicCommands {
+        set setup chanset guildset serverset config ban unban baninfo botstats
+    }
+
+    # Dictionary containing command parameter definitions:
+    #     cmdName {-paramName {paramPattern paramType required options}}
+    # For param types:
+    #     string options is a list of valid values
+    #     channel options is a list of required permissions
+    #     user options is a list of valid users, where !bot means it cannot be
+    #         a bot
+    variable pubCmdArgs {
+        setup {
+            -type     {{^-t(?:ype)?$}         string  1 {
+                help log announcement announcements tablesize banexpiry
+                banduration
+            }}
+            -value    {{^-v(?:al(?:ue)?)?$}   string  0 {}}
         }
-    } else {
-        metadb eval "
-            CREATE TABLE IF NOT EXISTS chatlog_${guildId}(
-                msgId text,
-                userId text,
-                content text,
-                embed text,
-                attachment text,
-                pinned text
-            )
-        "
+        ban {
+            -user     {{^-u(?:ser)?$}          user     1 {!bot}}
+            -duration {{^-d(?:ur(?:ation)?)?$} duration 0 {}}
+            -scope    {{^-s(?:cope)?$}         string   0 {guild bot}}
+            -reason   {{^-r(?:eason)?$}        text     0 {}}
+        }
+        unban {
+            -user     {{^-u(?:ser)?$}          user     1 {}}
+        }
+        banInfo {
+            -user     {{^-u(?:ser)?$}          user     0 {}}
+            -scope    {{^-s(?:cope)?$}         string   0 {
+                user server guild bot
+            }}
+            -view     {{^-v(?:iew)?$}}         view     0 {
+                user reason by date expiry guild size
+            }}
+        }
     }
+
+    variable setupTypes {
+        log           {channel SEND_MESSAGES}
+        announcement  {channel SEND_MESSAGES}
+        announcements {channel SEND_MESSAGES}
+        tablesize     {value int       {>=70}}
+        banexpiry     {value duration  {}}
+        banduration   {value duration  {}}
+    }
+    variable setupTypeAlias {
+        announcements announcement banduration banexpiry
+    }
+
+    lappend ::allEventExec {::meta::bump $event}
+    lappend ::eventExecute(MESSAGE_CREATE) {::meta::logChat $data}
+
+    foreach command $publicCommands {
+        if {![info exists ::bindings($command)]} {
+            set ::bindings($command) ::meta
+        } else {
+            set msg "Error while loading meta module: Binding for command "
+            append msg "$command unsuccessful; $command has already been bound "
+            append msg "to $::bindings($command) module."
+            puts $msg
+            unset msg
+        }
+    }
+
+    # putGc putDm editGc deleteGc update_members log_presence log_member
+    # welcome_msg part_msg log_ban_remove 
 }
 
 # meta::command --
@@ -129,151 +115,232 @@ proc meta::build_logs {{guildId {}}} {
 #   None
 
 proc meta::command {data text channelId guildId userId} {
-    set banned [metadb eval {SELECT userId FROM banned WHERE userId = :userId}]
-    if {$userId in $banned} {return}
+    if {[isBot "" $data] || [isBanned $userId $guildId]} return
+
     switch [lindex $text 0] {
-        "!setup" {
+        "set" -
+        "chanset" -
+        "guildset" - 
+        "serverset" -
+        "config" -
+        "setup" {
             if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}]
+                [hasPerm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}]
             } {
-                setup [regsub {!setup *} $text {}]
+                setup [lrange $text 1 end]
             }
         }
-        "!ban" {
+        "ban" {
             if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
+                $userId == $::ownerId ||
+                [hasPerm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
+            } {
+                ban [lrange $text 1 end]
+            }
+        }
+        "unban" {
+            if {
+                $userId == $::ownerId ||
+                [hasPerm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}]
+            } {
+                unban [lrange $text 1 end]
+            }
+        }
+        "botstats" {
+            putBotStats
+        }
+        "delete" {
+            if {
+                [hasPerm $userId {MANAGE_MESSAGES}]
                 || $userId == $::ownerId
             } {
-                ban [regsub {!ban *} $text {}]
+                deleteGc [regsub {!delete *} $text {}] $channelId
             }
         }
-        "!unban" {
+        "bulkdelete" {
             if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}]
-                || $userId == $::ownerId
-            } {
-                unban [regsub {!unban *} $text {}]
-            }
-        }
-        "!botstats" {
-            put_bot_stats
-        }
-        "!delete" {
-            if {
-                [has_perm $userId {MANAGE_MESSAGES}]
-                || $userId == $::ownerId
-            } {
-                deletedc [regsub {!delete *} $text {}] $channelId
-            }
-        }
-        "!bulkdelete" {
-            if {
-                [has_perm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
+                [hasPerm $userId {ADMINISTRATOR MANAGE_CHANNELS MANAGE_GUILD}] 
                 || $userId == $::ownerId
             } {
                 set option [lassign [regsub {!bulkdelete *} $text {}] n]
-                bulk_delete $n $option
+                bulkDelete $n $option
             }
         }
-        "!help" {
+        "help" {
             help
         }
-        "!about" {
+        "about" {
             about
         }
         default {
-            # Other commands
-            if {[::custom::command]} {
-                return
-            } elseif {[::pokebattle::command]} {
-                return
-            } elseif {[::pokedex::command]} {
-                return
-            } elseif {[::stats::command]} {
-                return
-            } elseif {[::pogo::command]} {
-                return
-            } elseif {[::anime::command]} {
-                return
-            } elseif {[::fgo::command]} {
-                return
-            }
+            puts "::meta::command Error: Unknown command [lindex $text 0]"
         }
     }
 }
 
-#############################
-##### Public procedures #####
-#############################
+################################################################################
+### Public procedures                                                        ###
+################################################################################
 
 # meta::setup --
 #
-#   Manage the settings for automatic messages. Currently for logs, serebii 
-#   articles and anime subs. Saves the settings per guild in the config sqlite3 
-#   table
+#   Manage the settings for automatic messages. Saves the settings per guild in 
+#   the config sqlite3 table
 #
 # Arguments:
-#   arg    arg must be two words:
-#             type - type of setting (log, serebii, anime
-#             channel - channel ID, object or name
+#   data    parameters for the setup command, see setupHelp syntax in 
+#           messages.json
 #
 # Results:
-#   Posts a message informaing whether the action was successful or not.
+#   Posts a message informing whether the action was successful or not.
+#
+# To do:
+#   Add other things like configure ban duration, bot command prefix
 
-proc meta::setup {arg} {
-    if {[llength [split $arg { }]] != 2} {
-        set msg "Incorrect number of parameters.\nUsage: "
-        append msg "!setup **type** **channel**"
-        putdc [dict create content $msg] 0
+proc meta::setup {data} {
+    variable pubCmdArgs setupTypes setupTypeAlias
+    
+    if {$data eq ""} {
+        sendMsg setupHelp
         return
-    }
-    lassign [split $arg { }] type channel
-    if {$type ni [list log anime serebii]} {
-        putdc [dict create content \
-                "Invalid setup type. Should be log, serebii or anime"] 0
+    } elseif {
+        [catch {::util::parseArgs [dict get $pubCmdArgs setup] $data} arg err]
+    } {
+        puts "meta::setup Error: $err"
+        sendMsg setupHelp $arg
+        return
+    } elseif {$arg eq ""} {
+        sendMsg setupHelp
         return
     }
     
-    upvar guildId guildId
-    set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
-    set guildData {*}$guildData
-    set channels [dict get $guildData channels]
+    set type [dict get $arg -type]
+    set value [dict get $arg -value]
 
-    if {[regexp {^(?:<#([0-9]+)>|([0-9]+))$} $channel - m1 m2]} {
-        set channelId $m1$m2
-    } else {
-        set chanNames [lmap x $channels {dict get $x name}]
-        if {$channel ni $chanNames} {
-            putdc [dict create content "Invalid channel."] 0
+    set category [lindex [dict get $setupTypes $type] 0]
+    switch $category {
+        "help" {
+            sendMsg [format {setup%sHelp} [string totitle $value]]
             return
         }
-        set idx [lsearch $chanNames $channel]
-        set channelId [dict get [lindex $channels $idx] id]
+        "channel" {
+            set options [lindex [dict get $setupTypes $type] 1]
+            if {$value eq ""} {
+                set channelId [uplevel {set channelId}]
+            } elseif {[string tolower $value] eq "null"} {
+                upvar guildId guildId
+                set res [metadb eval {
+                    SELECT channel_id FROM config
+                    WHERE 
+                        guild_id = :guildId AND
+                        channel_id = :channelId AND
+                        type = :type
+                }]
+                if {$res eq ""} {
+                    set msg "No channel was previously set to $type."
+                } else {
+                    metadb eval {
+                        DELETE FROM config
+                        WHERE guild_id = :guildId AND type = :type
+                    }
+                    set msg "$type channel was unset."
+                }
+            } elseif {
+                [catch {::util::validateChannel $value $options} channelId]
+            } {
+                puts "meta::setup Error: $err"
+                sendMsg setupHelp $arg
+                return
+            } else {
+                upvar guildId guildId
+                set res [metadb eval {
+                    SELECT channel_id FROM config
+                    WHERE 
+                        guild_id = :guildId AND
+                        channel_id = :channelId AND
+                        type = :type
+                }]
+                if {$res eq ""} {
+                    metadb eval {
+                        INSERT INTO config 
+                        VALUES(:guildId, :channelId, :type, null)
+                    }
+                    set msg "<#$channelId> has been set as $type."
+                } elseif {$res eq $channelId} {
+                    set msg "<#$channelId> is already set as $type."
+                } else {
+                    metadb eval {
+                        UPDATE config SET channel_id = :channelId
+                        WHERE guild_id = :guildId AND type = :type
+                    }
+                    set msg "$type was changed from <#$res> to <#$channelId>"
+                }
+            }
+        }
+        "value" {
+            lassign [dict get $setupTypes $type] - dataType options
+
+            if {$value eq ""} {
+                set type [string map $setupTypeAlias $type]
+                sendMsg [format {setup%sHelp} [string totitle $type]]
+                return
+            } elseif {[string tolower $value] eq "null"} {
+                upvar guildId guildId
+                set res [metadb eval {
+                    SELECT value FROM config
+                    WHERE 
+                        guild_id = :guildId AND
+                        type = :type
+                }]
+
+                if {$res eq ""} {
+                    set msg "Setting for $type has not been previously "
+                    append msg "configured as $value."
+                } else {
+                    metadb eval {
+                        DELETE FROM config
+                        WHERE guild_id = :guildId AND type = :type
+                    }
+                    set msg "$type setting was unset."
+                }
+            } else {
+                set dataTypeCheck [format "::util::validate%s" \
+                    [string totitle $dataType]]
+                if {
+                    [catch {$dataTypeCheck $value $options} value]
+                } {
+                    puts "meta::setup Error: $err"
+                    sendMsg [format {setup%sHelp} [string totitle $value]] $arg
+                    return
+                }
+
+                upvar guildId guildId
+                set res [metadb eval {
+                    SELECT value FROM config
+                    WHERE 
+                        guild_id = :guildId AND
+                        type = :type
+                }]
+
+                if {$res eq ""} {
+                    metadb eval {
+                        INSERT INTO config VALUES(:guildId, null, :type, :value)
+                    }
+                    set msg "Setting for $type has been set as $value."
+                } elseif {$res eq $value} {
+                    set msg "Setting for $type is already set to $value."
+                } else {
+                    metadb eval {
+                        UPDATE config SET value = :value
+                        WHERE guild_id = :guildId AND type = :type
+                    }
+                    set msg "Setting for $type was changed from $res to $value."
+                }
+            }
+        }
     }
     
-    set channelIds [lmap x $channels {dict get $x id}]
-    if {$channelId ni $channelIds} {
-        putdc [dict create content "Invalid channel."] 0
-        return
-    }
-    set res [metadb eval {
-        SELECT channelId FROM config
-        WHERE guildId = :guildId AND
-        type = :type
-    }]
-    if {$res eq ""} {
-        metadb eval {INSERT INTO config VALUES(:guildId, :type, :channelId)}
-        set msg "<#$channelId> has been set as $type."
-    } elseif {$res eq $channelId} {
-        set msg "<#$channelId> is already set as $type!"
-    } else {
-        metadb eval {
-            UPDATE config SET channelId = :channelId
-            WHERE guildId = :guildId AND type = :type
-        }
-        set msg "$type was changed from <#$res> to <#$channelId>"
-    }
-    putdc [dict create content $msg] 0
+    putGc [dict create content $msg] 0
 }
 
 # meta::ban --
@@ -281,58 +348,325 @@ proc meta::setup {arg} {
 #   Ban a user from using this bot's commands
 #
 # Arguments:
-#   text   User object or user ID of the user to be banned
+#   data   Parameters for the ban command, see banHelp syntax in messages.json
 #
 # Results:
 #   Posts whether the ban was successful or not
 
-proc meta::ban {text} {
-    set users [guild eval {SELECT userId FROM users}]
-    if {[regexp {<@!?([0-9]+)>} $text - userId] && $userId in $users} {
-        set result [metadb eval {
-            SELECT userId FROM banned WHERE userId = :userId
-        }]
-        if {$result != ""} {
-            set msg "<@$userId> is already banned from my commands!"
-        } else {
-            metadb eval {INSERT INTO banned VALUES(@userId)}
-            set msg "<@$userId> was banned from all my commands!"
-        }
-    } else {
-        set msg "No such user found."
-    }
-    putdc [dict create content $msg] 0
-}
+proc meta::ban {data} {
+    variable pubCmdArgs
 
+    if {$data eq ""} {
+        sendMsg banHelp
+        return
+    } elseif {
+        [catch {::util::parseArgs [dict get $pubCmdArgs ban] $data} arg err]
+    } {
+        puts "meta::ban Error: $err"
+        sendMsg banHelp $arg
+        return
+    } elseif {$arg eq ""} {
+        sendMsg banHelp
+        return
+    }
+
+    set targetId [dict get $arg -user]
+    set duration [dict get $arg -duration]
+    set scope [dict get $arg -scope]
+    set reason [dict get $arg -reason]
+
+    upvar userId userId
+    if {$scope == "bot"} {    
+        if {![isBotAdmin $userId]} {
+            set msg "You are not allowed to ban a user from the bot. Contact "
+            append msg "one of the bot admins ([join [getBotAdmins] {, }]) to "
+            append msg "explain why you need a user ban beyond guild level."
+            putGc [dict create content $msg] 0
+            return
+        }
+        set guildId ""
+    } else {
+        set guildId [uplevel {set guildId}]
+    }
+    
+    if {[isBanned $targetId $guildId]} {
+        set msg "<@$targetId> is already banned from my commands!"
+    } else {
+        set now [clock seconds]
+        if {$duration eq "perm"} {
+            set expiry ""
+        } elseif {$duration eq ""} {
+            set duration [metadb eval {
+                SELECT value FROM config 
+                WHERE guild_id = :guildId AND type = 'banexpiry'
+            }]
+            if {$duration eq ""} {
+                # Set duration to 4 weeks
+                set duration 2419200‬
+            }
+            set expiry [expr {$now + $duration}]
+        } else {
+            set expiry [expr {$now + $duration}]
+        }
+        
+        metadb eval {INSERT INTO banned VALUES(
+            :targetId,
+            :guildId,
+            :reason,
+            :userId,
+            :now,
+            :expiry
+        )}
+        set msg "<@$targetId> was banned from all my commands!"
+    }
+
+    putGc [dict create content $msg] 0
+}
 
 # meta::unban --
 #
 #   Unban a user from using this bot's commands
 #
 # Arguments:
-#   text   User object or user ID of the user to be unbanned
+#   data   Parameters for the ban command, see unbanHelp syntax in messages.json
 #
 # Results:
 #   Posts whether the unban was successful or not
 
-proc meta::unban {text} {
-    if {[regexp {<@!?([0-9]+)>} $text - userId]} {
-        set result [metadb eval {
-            SELECT userId FROM banned WHERE userId = :userId
-        }]
-        if {$result != ""} {
-            metadb eval {DELETE FROM banned WHERE userId = :userId}
-            set msg "<@$userId>'s ban from my commands was lifted!"
-        } else {
-            set msg "No ban for <@$userId> was found!"
-        }
-    } else {
-        set msg "No such user found."
+proc meta::unban {data} {
+    variable pubCmdArgs
+
+    if {$data eq ""} {
+        sendMsg unbanHelp
+        return
+    } elseif {
+        [catch {::util::parseArgs [dict get $pubCmdArgs unban] $data} arg err]
+    } {
+        puts "meta::unban Error: $err"
+        sendMsg unbanHelp $arg
+        return
+    } elseif {$arg eq ""} {
+        sendMsg unbanHelp
+        return
     }
-    putdc [dict create content $msg] 0
+
+    set targetId [dict get $arg -user]
+
+    upvar userId userId
+    set bans [metadb eval {
+        SELECT guildId FROM banned
+        WHERE user_id = :targetId AND 
+        (date_ban_lifted > :now OR date_ban_lifted = '') AND
+        (guildId = '' OR guildId = :guildId)
+    }]
+    
+    switch [llength $bans] {
+        0 {
+            set msg "No ban for <@$targetId> was found."
+        }
+        1 {
+            if {$bans == "" && ![isBotAdmin $userId]} {
+                set msg "You are not allowed to unban a user from the bot. "
+                append msg "Contact one of the bot admins ("
+                append msg "[join [getBotAdmins] {, }]) to explain why you "
+                append msg "need a user unban beyond guild level."
+            } else {
+                metadb eval {DELETE FROM banned WHERE userId = :userId}
+                set msg "<@$targetId>'s ban has been lifted."
+            }
+        }
+        2 {
+            if {$guildId in $bans} {
+                metadb eval {
+                    DELETE FROM banned
+                    WHERE userId = :userId AND guildId = :guildId
+                }
+                set msg "<@$targetId>'s ban for this server has been lifted."
+            } else {
+                if {![isBotAdmin $userId]} {
+                    set msg "You are not allowed to unban a user from the bot. "
+                    append msg "Contact one of the bot admins ("
+                    append msg "[join [getBotAdmins] {, }]) to explain why you "
+                    append msg "need a user unban beyond guild level."
+                } else {
+                    metadb eval {
+                        DELETE FROM banned 
+                        WHERE userId = :userId AND guildId = ''
+                    }
+                    set msg "<@$targetId>'s global ban has been lifted."
+                }
+            }
+        }
+    }
+    
+    putGc [dict create content $msg] 0
 }
 
-# meta::put_bot_stats --
+# meta::banInfo --
+#
+#   Posts information on a user's ban.
+#
+# Arguments:
+#   data   Parameters for the ban command, see banInfoHelp syntax in 
+#          messages.json
+#
+# Results:
+#   Posts information about the user's ban
+
+proc meta::banInfo {data} {
+    variable pubCmdArgs
+
+    if {$data eq ""} {
+        sendMsg banInfoHelp
+        return
+    } elseif {
+        [catch {::util::parseArgs [dict get $pubCmdArgs banInfo] $data} arg err]
+    } {
+        puts "meta::banInfo Error: $err"
+        sendMsg banInfoHelp $arg
+        return
+    } elseif {$arg eq ""} {
+        sendMsg banInfoHelp
+        return
+    }
+
+    set targetId [dict get $arg -user]
+    set scope [dict get $arg -scope]
+    set view [dict get $arg -view]
+
+    upvar guildId guildId
+    switch $scope {
+        "user" {
+            set fields {}
+            metadb eval {
+                SELECT reason, banned_by, date_created, date_ban_lifted
+                FROM banned
+                WHERE user_id = :targetId AND 
+                (date_ban_lifted > :now OR date_ban_lifted = '') AND
+                (guildId = '' OR guildId = :guildId)
+            } arr {
+                lappend fields [dict create \
+                    name "Date:" \
+                    value [clock format $arr(date_created) \
+                        -format "%a %d %b %Y %T UTC" -timezone UTC] \
+                    inline true
+                ] [dict create \
+                    name "By:" \
+                    value $arr(banned_by) \
+                    inline true
+                ] [dict create \
+                    name "Expires:" \
+                    value [expr {
+                        $arr(date_ban_lifted) eq "" ? 
+                        "Does not expire" : 
+                        [clock format $arr(date_ban_lifted) \
+                            -format "%a %d %b %Y %T UTC" -timezone UTC]
+                    }] \
+                    inline true
+                ] [dict create \
+                    name "Reason:" \
+                    value $arr(reason) \
+                ]
+            }
+
+            if {[llength $fields] == 0} {
+                set msg "No ban for <@$targetId> was found."
+            } else {
+                set msg [dict create embed [dict create \
+                    title "Bans for <@$targetId>" \
+                    fields $fields \
+                ]]
+            }
+        }
+        "server" -
+        "guild" {
+            set userId [uplevel {set userId}]
+            set header {
+                User user By user Date date Expiry date Reason text
+            }
+            set rows {}
+            metadb eval {
+                SELECT 
+                    user_id AS User,
+                    reason AS Reason,
+                    banned_by AS By,
+                    date_created AS Date,
+                    date_ban_lifted AS Expiry
+                FROM banned
+                WHERE (date_ban_lifted > :now OR date_ban_lifted = '') AND
+                guildId = :guildId
+            } arr {
+                lappend rows [array get arr]
+            }
+
+            if {$view == ""} {
+                set size [metadb eval {
+                    SELECT value FROM config 
+                    WHERE guld_id = :guildId AND type = 'tablesize'
+                }]
+                if {$size == ""} {set size 70}
+                set view [list \
+                    [dict create column User filter {} sort {}] \
+                    [dict create column By filter {} sort {}] \
+                    [dict create column Date filter {} sort {}] \
+                    [dict create column Expiry filter {} sort {}] \
+                    [dict create column Reason filter {} sort {}] \
+                    [dict create column Size filter $size sort {}] \
+                ]
+            }
+            
+            set msg [::util::formatTable $header $rows $view]
+        }
+        "bot" {
+            set userId [uplevel {set userId}]
+            if {![isBotAdmin $userId]} {
+                set msg "You must be a bot admin to use this option."
+            } else {
+                set header {
+                    User user Guild guild By user Date date Expiry date Reason
+                    text
+                }
+                set rows {}
+                metadb eval {
+                    SELECT 
+                        user_id AS User, 
+                        reason AS Reason, 
+                        banned_by AS By, 
+                        date_created AS Date, 
+                        date_ban_lifted AS Expiry,
+                        guild_id AS Guild
+                    FROM banned
+                    WHERE (date_ban_lifted > :now OR date_ban_lifted = '')
+                } arr {
+                    lappend rows [array get arr]
+                }
+
+                if {$view == ""} {
+                    set size [metadb eval {
+                        SELECT value FROM config 
+                        WHERE guld_id = :guildId AND type = 'tablesize'
+                    }]
+                    if {$size == ""} {set size 70}
+                    set view [list \
+                        [dict create column User filter {} sort {}] \
+                        [dict create column Guild filter {} sort {}] \
+                        [dict create column By filter {} sort {}] \
+                        [dict create column Date filter {} sort {}] \
+                        [dict create column Expiry filter {} sort {}] \
+                        [dict create column Reason filter {} sort {}] \
+                        [dict create column Size filter $size sort {}] \
+                    ]
+                }
+                
+                set msg [::util::formatTable $header $rows $view]
+            }
+        }
+    }
+
+    putGc [dict create content $msg] 0
+}
+
+# meta::putBotStats --
 #
 #   Posts the count for all registered events the bot has gone through in the
 #   channel the command was invoked
@@ -343,7 +677,7 @@ proc meta::unban {text} {
 # Results:
 #   None
 
-proc meta::put_bot_stats {} {
+proc meta::putBotStats {} {
     variable botstats
     set msg [list]
     set kmax 8
@@ -354,7 +688,7 @@ proc meta::put_bot_stats {} {
     lappend msg ""
     foreach k $botstats(order) {
         if {$k eq "UPTIME"} {
-            set v [formatTime [expr {[clock seconds]-$botstats($k)}]]
+            set v [::util::formatTime [expr {[clock seconds]-$botstats($k)}]]
             lappend msg [list $k $v]
         } else {
             if {$botstats($k) > 0} {
@@ -368,8 +702,8 @@ proc meta::put_bot_stats {} {
                 continue
             }
         }
-        set kmax [expr {[string len $k] > $kmax ? [string len $k] : $kmax}]
-        set vmax [expr {[string len $v] > $vmax ? [string len $v] : $vmax}]
+        set kmax [expr {max([string length $k], $kmax)}]
+        set vmax [expr {max([string length $v], $vmax)}]
     }
     set msg [lmap x $msg {
         if {$x == ""} {
@@ -378,7 +712,7 @@ proc meta::put_bot_stats {} {
             format "%-${kmax}s %${vmax}s" {*}$x
         }
     }]
-    putdc [dict create content "```[join $msg \n]```"] 0
+    putGc [dict create content "```[join $msg \n]```"] 0
 }
 
 # meta::delete --
@@ -392,15 +726,14 @@ proc meta::put_bot_stats {} {
 #   None
 
 proc meta::delete {msgId} {
-    if {![has_perm [dict get [set ${sessionNs}::self] id] MANAGE_MESSAGES]} {
+    if {![hasPerm [dict get [set ${::session}::self] id] MANAGE_MESSAGES]} {
         set msg "I don't have the permission (Manage Messages) to execute this."
-        putdc [dict create content $msg] 0
+        putGc [dict create content $msg] 0
         return
     }
-
 }
 
-# meta::bulk_delete --
+# meta::bulkDelete --
 #
 #   Deletes the previous messages in the current channel. 
 #
@@ -415,11 +748,11 @@ proc meta::delete {msgId} {
 # Results:
 #   None
 
-proc meta::bulk_delete {n option} {
+proc meta::bulkDelete {n option} {
     upvar guildId guildId
-    if {![has_perm [dict get [set ${::session}::self] id] MANAGE_MESSAGES]} {
+    if {![hasPerm [dict get [set ${::session}::self] id] MANAGE_MESSAGES]} {
         set msg "I don't have the permission (Manage Messages) to execute this."
-        putdc [dict create content $msg] 0
+        putGc [dict create content $msg] 0
         return
     }
     upvar channelId channelId
@@ -429,7 +762,7 @@ proc meta::bulk_delete {n option} {
         append msg {be one of: __**before** msgId__, __**after** msgId__, }
         append msg {__**around** msgId__. Between 2 and 100 messages inclusive }
         append msg {can be bulk deleted.}
-        putdc [dict create content $msg] 0
+        putGc [dict create content $msg] 0
         return
     }
     set force 0
@@ -451,7 +784,7 @@ proc meta::bulk_delete {n option} {
             append msg {_number\_of\_messages option -force_**. __**option**__ }
             append msg {can be one of: __**before** msgId__, __**after** }
             append msg {msgId__, __**around** msgId__.}
-            putdc [dict create content $msg] 0
+            putGc [dict create content $msg] 0
             return
         }
     }
@@ -464,7 +797,7 @@ proc meta::bulk_delete {n option} {
     set data [lindex $response 0]
     if {$data eq {}} {
         set msg "An error occurred. Could not find messages to delete."
-        putdc [dict create content $msg] 0
+        putGc [dict create content $msg] 0
         return
     }
     set lMsg [list]
@@ -483,10 +816,8 @@ proc meta::bulk_delete {n option} {
         }
     }
     set cmd [expr {[llength $lMsg] < 2 ? deleteMessage : bulkDeleteMessages}]
-    if {[catch {discord $cmd $::session $channelId $lMsg 1} resCoro]} {
-        return
-    }
-    if {$resCoro eq {}} {return}
+    if {[catch {discord $cmd $::session $channelId $lMsg 1} resCoro]} return
+    if {$resCoro eq {}} return
     yield $resCoro
     set response [$resCoro]
     if {[dict get [lindex $response 1] http] != "HTTP/1.1 204 NO CONTENT"} {
@@ -506,8 +837,8 @@ proc meta::bulk_delete {n option} {
                 set msg "Successfully bulk deleted $del messages. The remaining"
                 append msg " [expr {$n-$del}] messages will be individually "
                 append msg "deleted within the next few moments."
-                after idle [list coroutine ::meta::deletedc[::id] \
-                        ::meta::deletedc $oMsg $channelId]
+                after idle [list coroutine ::meta::deleteGc[::id] \
+                    ::meta::deleteGc $oMsg $channelId]
             } else {
                 set msg "Successfully deleted $del messages ([expr {$n-$del}] "
                 append msg "messages did not get deleted due to being too old -"
@@ -518,8 +849,8 @@ proc meta::bulk_delete {n option} {
             set msg "Successfully deleted $n messages."
         }
     }
-    after idle [list coroutine ::meta::putdc[::id] ::meta::putdc \
-            [dict create content $msg] 0 $channelId]
+    after idle [list coroutine ::meta::putGc[::id] ::meta::putGc \
+        [dict create content $msg] 0 $channelId]
 }
 
 # meta::help --
@@ -535,7 +866,7 @@ proc meta::bulk_delete {n option} {
 proc meta::help {} {
     set msg "Available commands are listed here: "
     append msg "https://github.com/Unknown008/MarshtompBot/blob/master/help.md"
-    putdc [dict create content $msg] 0
+    putGc [dict create content $msg] 0
 }
 
 # meta::about --
@@ -549,22 +880,22 @@ proc meta::help {} {
 #   None
 
 proc meta::about {} {
-    set msg "Marshtomp is a bot managed by Unknown008#4135 created by "
-    append msg "qwename#5406. The bot is a multipurpose bot with various "
-    append msg "modules ranging from server management, anime torrent feed, "
-    append msg "Pok\u00E9dex resource, Pok\u00E9mon news feed from serebii.net,"
-    append msg " Fate Grand Order resource to various silly 'fun' modules like "
-    append msg "classic 8ball. More features might have been implemented when "
-    append msg "you see this message."
+    set msg [join [list "Marshtomp is a bot managed by Unknown008#4135 " \
+        "created by qwename#5406. The bot is a multipurpose bot with various " \
+        "modules ranging from server management, anime torrent feed, " \
+        "Pok\u00E9dex resource, Pok\u00E9mon news feed from serebii.net, " \
+        "Fate/Grand Order resource to various silly 'fun' modules like" \
+        "classic 8ball. More features might have been implemented when you " \
+        "see this message."] " "]
 
-    putdc [dict create content $msg] 1
+    putGc [dict create content $msg] 1
 }
 
 #############################
 ##### Private procedures ####
 #############################
 
-# meta::putdc --
+# meta::putGc --
 #
 #   Posts a message into a certain channel ID
 #
@@ -575,18 +906,18 @@ proc meta::about {} {
 #   channelId  (optional) channel ID to which the message should be posted to.
 #              Defaults to the channel ID from meta::command (the channel the
 #              command was posted in
-#   cmdlist    (optional) list of commands to be executed after the message has
+#   cmdList    (optional) list of commands to be executed after the message has
 #              been successfully posted
 #
 # Results:
 #   None
 
-proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
+proc meta::putGc {data encode {channelId {}} {cmdList {}}} {
     variable localLimits
-    puts "meta::putdc called from [info level 1] with data $data"
+    puts "meta::putGc called from [info level 1] with data $data"
     if {$channelId eq ""} {
         set channelId [uplevel #2 {set channelId}]
-    } elseif {$channelId eq "test"} {
+    } elseif {$channelId in {test default}} {
         set channelId 236097944158208000
     }
     
@@ -620,8 +951,10 @@ proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
         set secsRemain [expr {$reset - [clock seconds]}]
         if {$secsRemain >= -3} {
             after [expr {(abs($secsRemain)+3)*1000}] [list coroutine \
-                    ::meta::putdc[::id] ::meta::putdc $data $encode $channelId \
-                    $cmdlist]
+                ::meta::putGc[::id] ::meta::putGc $data $encode $channelId \
+                $cmdList]
+            set msg "::meta::putGc Error: Rate limited"
+            puts "[clock format [clock seconds] -format {[%Y-%m-%d %T]}] $msg"
             return
         }
     }
@@ -632,19 +965,21 @@ proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
         dict set data content $text
     }
     if {[catch {discord sendMessage $::session $channelId $data 1} resCoro]} {
+        set msg "::meta::putGc Error: Failed to send ($resCoro)"
+        puts "[clock format [clock seconds] -format {[%Y-%m-%d %T]}] $msg"
         return
     }
     if {$resCoro eq {}} {return}
     yield $resCoro
     set response [$resCoro]
     set data [lindex $response 0]
-    if {$data ne {} && $cmdlist != {}} {
-        set cmdlist [lassign $cmdlist cmd]
-        {*}$cmd $cmdlist
+    if {$data ne {} && $cmdList != {}} {
+        set cmdList [lassign $cmdList cmd]
+        {*}$cmd $cmdList
     }
 }
 
-# meta::putdcPM --
+# meta::putDm --
 #
 #   Posts a message into a certain private channel ID. If the channel does not
 #   exist yet, create it then post the message.
@@ -654,15 +989,15 @@ proc meta::putdc {data encode {channelId {}} {cmdlist {}}} {
 #   msgdata    dictionary of the message (to be converted to JSON format)
 #   encode     boolean, specifies whether the message contents should be html
 #              encoded or not
-#   cmdlist    (optional) list of commands to be executed after the message has
+#   cmdList    (optional) list of commands to be executed after the message has
 #              been successfully posted
 #
 # Results:
 #   None
 
-proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
+proc meta::putDm {userId msgdata encode {cmdList {}}} {
     variable localLimits
-    puts "meta::putdcPM called from [info level 1] with data $msgdata for $userId"
+    puts "meta::putDm called from [info level 1] with data $msgdata for $userId"
     if {$encode && [dict exists $msgdata content]} {
         set text [dict get $msgdata content]
         set text [encoding convertto utf-8 $text]
@@ -710,8 +1045,8 @@ proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
         set secsRemain [expr {$reset - [clock seconds]}]
         if {$secsRemain >= -3} {
             after [expr {(abs($secsRemain)+3)*1000}] [list coroutine \
-                    ::meta::putdcPM[::id] ::meta::putdcPM $userId $msgdata \
-                    $encode $cmdlist]
+                    ::meta::putDm[::id] ::meta::putDm $userId $msgdata \
+                    $encode $cmdList]
             return
         }
     }
@@ -728,9 +1063,9 @@ proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
             yield $resCoro
             set response [$resCoro]
             set data [lindex $response 0]
-            if {$data ne {} && $cmdlist != {}} {
-                set cmdlist [lassign $cmdlist cmd]
-                {*}$cmd $cmdlist
+            if {$data ne {} && $cmdList != {}} {
+                set cmdList [lassign $cmdList cmd]
+                {*}$cmd $cmdList
             }
         }
     } else {
@@ -738,14 +1073,14 @@ proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
         yield $resCoro
         set response [$resCoro]
         set data [lindex $response 0]
-        if {$data ne {} && $cmdlist != {}} {
-            set cmdlist [lassign $cmdlist cmd]
-            {*}$cmd $cmdlist
+        if {$data ne {} && $cmdList != {}} {
+            set cmdList [lassign $cmdList cmd]
+            {*}$cmd $cmdList
         }
     }
 }
 
-# meta::editdc --
+# meta::editGc --
 #
 #   Posts an edit to a message posted previously
 #
@@ -755,13 +1090,13 @@ proc meta::putdcPM {userId msgdata encode {cmdlist {}}} {
 #              encoded or not
 #   msgId      message ID of the message to be edited
 #   channelId  channel ID the message was previously posted to
-#   cmdlist    (optional) list of commands to be executed after the edit has
+#   cmdList    (optional) list of commands to be executed after the edit has
 #              been successfully posted
 #
 # Results:
 #   None
 
-proc meta::editdc {data encode msgId channelId {cmdlist {}}} {
+proc meta::editGc {data encode msgId channelId {cmdList {}}} {
     if {
         $encode
         && [dict exists $data content] 
@@ -782,13 +1117,13 @@ proc meta::editdc {data encode msgId channelId {cmdlist {}}} {
     yield $resCoro
     set response [$resCoro]
     set data [lindex $response 0]
-    if {$data ne {} && $cmdlist != {}} {
-        set cmdlist [lassign $cmdlist cmd]
-        {*}$cmd $cmdlist
+    if {$data ne {} && $cmdList != {}} {
+        set cmdList [lassign $cmdList cmd]
+        {*}$cmd $cmdList
     }
 }
 
-# meta::deletedc --
+# meta::deleteGc --
 #
 #   Deletes a message with specified IDs
 #
@@ -798,9 +1133,9 @@ proc meta::editdc {data encode msgId channelId {cmdlist {}}} {
 # Results:
 #   None
 
-proc meta::deletedc {msgId {channelId {}}} {
+proc meta::deleteGc {msgId {channelId {}}} {
     if {![string is wideinteger -strict [lindex $msgId 0]]} {
-        putdc [dict create content "Invalid message ID"] 0
+        putGc [dict create content "Invalid message ID"] 0
         return
     }
     
@@ -840,7 +1175,7 @@ proc meta::deletedc {msgId {channelId {}}} {
         set secsRemain [expr {$reset - [clock seconds]}]
         if {$secsRemain >= -3} {
             after [expr {(abs($secsRemain)+3)*1000}] [list coroutine \
-                    ::meta::deletedc[::id] ::meta::deletedc $msgId $channelId]
+                    ::meta::deleteGc[::id] ::meta::deleteGc $msgId $channelId]
             return
         }
     }
@@ -853,14 +1188,14 @@ proc meta::deletedc {msgId {channelId {}}} {
     set response [$resCoro]
     if {[dict get [lindex $response 1] http] == "HTTP/1.1 204 NO CONTENT"} {
         if {$msgId != ""} {
-            deletedc $msgId $channelId
+            deleteGc $msgId $channelId
         }
     }
 }
 
 # meta::update_members --
 #
-#   Update the guilds database with the actual members. GIULD_CREATE might have
+#   Update the guilds database with the actual members. GUILD_CREATE might have
 #   sent an incomplete list for various reasons
 #
 # Arguments:
@@ -927,27 +1262,29 @@ proc meta::update_members {} {
     }
 }
 
-# meta::log_delete --
+# meta::logDelete --
 #
 #   Triggered when a message is deleted and posts the deleted message and the 
 #   original author in the channel set as log through meta::setup
 #
 # Arguments:
-#   guildId     guild ID from which the message was received
-#   id          ID of the message
-#   sourceId    channel from which the message was originally posted
+#   body        dictionary containing the event data from the message delete 
+#               event
 #
 # Results:
 #   None
 
-proc meta::log_delete {guildId id sourceId} {
+proc meta::logDelete {guildId msgId sourceId} {
+    set guildId [dict get $data guild_id]
+    set msgId [dict get $data id]
+    set sourceId [dict get $data channel_id]
     set channelId [metadb eval {
         SELECT channelId FROM config WHERE guildId = :guildId AND type = 'log'
     }]
-    lassign [metadb eval "
-        SELECT userId, content, attachment FROM chatlog_$guildId 
-        WHERE msgId = :id 
-    "] targetId content attachment
+    lassign [metadb eval {
+        SELECT user_id, content, embed, attachment FROM chatlog
+        WHERE msg_id = :msgId 
+    }] targetId content attachment
     
     set targetName [getUsernameNick $targetId $guildId {%s (%s)}]
     
@@ -955,7 +1292,7 @@ proc meta::log_delete {guildId id sourceId} {
     set callback [discord getAuditLog $::session $guildId {limit 10} 1]
     # No callback generated. Shouldn't really happen
     if {$callback eq "" || $targetId eq ""} {
-        putdc [dict create content "Message #$id deleted from <#$sourceId>" \
+        putGc [dict create content "Message #$msgId deleted from <#$sourceId>" \
             embed [dict create \
                 color red \
         ]] 0 $channelId
@@ -968,7 +1305,7 @@ proc meta::log_delete {guildId id sourceId} {
             set auditObj ""
             foreach x [dict get $data audit_log_entries] {
                 if {
-                    [dict get $x id] > $id 
+                    [dict get $x id] > $msgId 
                     && [dict get $x action_type] == 72
                     && [dict get $x target_id] == $targetId
                     && [dict get $x options channel_id] == $sourceId
@@ -982,11 +1319,11 @@ proc meta::log_delete {guildId id sourceId} {
             if {$auditObj != ""} {
                 set userId [dict get $auditObj user_id]
                 set userName [getUsernameNick $userId $guildId]
-                set msg "Message #$id by *$targetName* deleted "
+                set msg "Message #$msgId by *$targetName* deleted "
                 append msg "from <#$sourceId> by *$userName*."
             # Match not found - user deleted own message
             } else {
-                set msg "Message #$id by *$targetName* deleted "
+                set msg "Message #$msgId by *$targetName* deleted "
                 append msg "from <#$sourceId>."
             }
             set delMsg [dict create content $msg embed [dict create \
@@ -998,61 +1335,113 @@ proc meta::log_delete {guildId id sourceId} {
                 dict set delMsg embed description \
                         "$content\nAttachments: [join $links {,}]"
             }
-            putdc $delMsg 0 $channelId
+            putGc $delMsg 0 $channelId
         # Delete is not in recent logs, shouldn't happen
         } else {
-            set msg "Message #$id deleted from <#$sourceId>"
-            putdc [dict create content $msg \
+            set msg "Message #$msgId deleted from <#$sourceId>"
+            putGc [dict create content $msg \
                 embed [dict create color red]
             ] 0 $channelId
         }
     }
-    if {[info exists userId]} {
-        ::stats::bump deleteMsg $guildId $sourceId $userId $content
-    }
+    # if {[info exists userId]} {
+    #     ::stats::bump deleteMsg $guildId $sourceId $userId $content
+    # }
 }
 
-# meta::log_chat --
+# meta::logChat --
 #
 #   Triggered when a message is created and saves the message in 
-#   chatlog_$guildId table.
+#   chatlog table.
 #
 # Arguments:
-#   guildId     guild ID from which the message was received
-#   msgId       message ID of the received message
-#   userId      user ID from whom the message was received from
-#   content     content of the message
-#   embed       any message embeds
-#   attachment  any attachments to the message
+#   None
 #
 # Results:
 #   None
 
-proc meta::log_chat {guildId msgId userId content embed attachment} {
-    metadb eval "
-        INSERT INTO chatlog_$guildId VALUES (
-            :msgId,:userId,:content,:embed,:attachment,'false'
+proc meta::logChat {data} {
+    set guildId [dict get $data guildId]
+    set channelId [dict get $data channelId]
+    set msgId [dict get $data id]
+    set userId [dict get $data author id]
+    set content [dict get $data content]
+    set embed [dict get $data embeds]
+    set attachments [dict get $data attachments]
+
+    # Saving data
+    set now [clock seconds]
+    metadb eval {
+        INSERT INTO chatlog VALUES (
+            :guildId, :channelId, :msgId, :userId, :content, :embed,
+            :attachments, 'false', :now
         )
-    "
-    set len [metadb eval "SELECT COUNT(*) FROM chatlog_$guildId"]
-    if {
-        $::custom::say(state) == 1 
-        && $content != "!say end"
-        && $userId != [dict get [set ${::session}::self] id]
-    } {
-        upvar channelId channelId
-        ::custom::say say [dict create content $content attachment $attachment]
     }
-    while {$len > 1000} {
-        set earliest [metadb eval "SELECT MIN(msgId) FROM chatlog_$guildId"]
-        metadb eval "DELETE FROM chatlog_$guildId WHERE msgId = :earliest"
-        set len [metadb eval "SELECT COUNT(*) FROM chatlog_$guildId"]
+
+    set re {([^/]+)/([^/]+)$}
+    if {[llength $attachments] > 0} {
+        foreach attachment $attachments {
+            set url [dict get $attachment url]
+            if {![regexp $re $url - msgId fileName]} {
+                set msg "::meta::saveAttachment Error: Could not extract msgId "
+                append msg "and file name"
+                puts $msg
+                continue
+            }
+            set fileName "${msgId}_$fileName"
+            ::http::geturl $url -command [list ::util::saveAttachment $fileName]
+        }
     }
-    if {$content ne ""} {
-        upvar channelId channelId
-        after idle [list ::stats::bump createMsg $guildId $channelId $userId \
-                $content]
+
+    # Deleting old data
+    set timestamps [metadb eval {
+        SELECT timestamp FROM chatlog
+        WHERE guild_id = :guildId AND channel_id = :channelId
+        ORDER BY timestamp DESC
+    }]
+
+    set limit [metadb eval {
+        SELECT value FROM config 
+        WHERE channel_id = :channelId AND type = 'chat history'
+    }]
+    if {$limit eq ""} {
+        set limit 500
     }
+
+    if {[llength $timestamps] > $limit} {
+        set cutOff [lindex $timestamps $limit-1]
+
+        set attachments [metadb eval {
+            SELECT attachment FROM chatlog
+            WHERE
+                guild_id = :guildId AND 
+                channel_id = :channelId AND
+                timestamp < :cutOff AND
+                attachment <> ''
+        }]
+
+        if {[llength $attachments] > 0} {
+            set paths [lmap x $attachments {
+                set url [dict get $x url]
+                regexp $re $url - msgId fileName
+                set x "${msgId}_$fileName"
+            }]
+            ::util::deleteFiles $paths
+        }
+
+        metadb eval {
+            DELETE FROM chatlog 
+            WHERE 
+                guild_id = :guildId AND 
+                channel_id = :channelId AND
+                timestamp < :cutOff
+        }
+    }
+    
+    # if {$content ne ""} {
+    #     after idle [list ::stats::bump createMsg $guildId $channelId $userId \
+    #         $content]
+    # }
 }
 
 # meta::log_presence --
@@ -1092,9 +1481,9 @@ proc meta::log_presence {guildId userId data} {
                 dict set userData $userId username $new
                 guild eval {UPDATE users SET data = :userData}
                 set msg "$prevUsername changed their username to $newUsername."
-                putdc [dict create content $msg] 1 $channelId
-                after idle \
-                        [list ::stats::bump nameChange $guildId "" $userId ""]
+                putGc [dict create content $msg] 1 $channelId
+                # after idle \
+                #     [list ::stats::bump nameChange $guildId "" $userId ""]
             }
         }
     }
@@ -1140,109 +1529,132 @@ proc meta::log_member {guildId userId data} {
             set msg "$username has a new nickname: $newNick."
         }
         guild eval {UPDATE users SET data = :userData WHERE userId = :userId}
-        putdc [dict create content $msg] 1 $channelId
+        putGc [dict create content $msg] 1 $channelId
     }
     
     # Else check for role change
 }
 
-# meta::log_msg_edit --
+# meta::logEdit --
 #
-#   Logs message edits to the chatlog_$guildId and post them to the channel set
+#   Logs message edits to the chatlog and post them to the channel set
 #   as log through meta::setup
 #
 # Arguments:
-#   body    dictionary containing the event data (converted from JSON)
+#   body        dictionary containing the event data from the message delete 
+#               event
 #
 # Results:
 #   None
 
-proc meta::log_msg_edit {body} {
+proc meta::logEdit {body} {
+    if {![dict exists $body type] || [dict get $body type] != 0} return
+    set userId [dict get $body author id]
+    if {$userId eq [dict get [set ${::session}::self] id]} return
+
     set guildId [dict get $body guild_id]
     set channelId [metadb eval {
         SELECT channelId FROM config WHERE guildId = :guildId AND type = 'log'
     }]
-    set userId [dict get $body author id]
-    if {$userId eq [dict get [set ${::session}::self] id]} {return}
     if {$channelId eq ""} {
-        set channelId test
+        set channelId default
     }
     set msgId [dict get $body id]
-    set pinned [dict get $body pinned]
-    lassign [metadb eval "
-        SELECT userId, content, attachment, pinned FROM chatlog_$guildId
-        WHERE msgId = :msgId 
-    "] targetId content attachment oldpinned
-    if {$oldpinned != $pinned} {
-        metadb eval "
-            UPDATE chatlog_$guildId SET pinned = :pinned WHERE msgId = :msgId
-        "
-        return
-    }
-    
+    set oldMsg [metadb eval {
+        SELECT user_id, content, embed, attachment FROM chatlog
+        WHERE msg_id = :msgId
+    }]
+
     set sourceId [dict get $body channel_id]
     set userName [getUsernameNick $userId $guildId]
-    set oldMsg ""
-    set newMsg ""
-    set msg "$userName edited message with ID $msgId."
+    set msg \
+        [encoding convertto utf-8 "$userName edited message with ID $msgId:"]
     
-    if {$content ne ""} {
-        set oldMsg $content
-        if {$attachment ne ""} {
-            set links [lmap x $attachment {dict get $x url}]
-            set oldMsg "$content\nAttachments: [join $links {,}]"
-        }
+    set oldContent ""
+    set newContent ""
+    set oldEmbed ""
+    set newEmbed ""
+    
+    if {$oldMsg ne ""} {
+        set oldContent [lindex $oldMsg 1]
+        set oldEmbed [lindex $oldMsg 2]
     }
     
     set callback [discord getMessage $::session $sourceId $msgId 1]
-    if {$callback eq ""} {
-        if {$oldMsg eq ""} {
-            putdc [dict create content $msg embed [dict create \
-                description "*Could not retrieve message contents*." \
-                color blue \
-            ]] 1
-        } else {
-            set newMsg "*Could not retrieve message contents*."
-            putdc [dict create content $msg embed [dict create \
-                description "From: $oldMsg\nTo: $newMsg" \
-                color blue \
-            ]] 0 $channelId
-        }
-    } else {
+
+    set data ""
+    if {$callback ne ""} {
         yield $callback
         set response [$callback]
         set data [lindex $response 0]
-        if {$data ne ""} {
-            set content [dict get $data content]
-            set newMsg $content
-            if {$oldMsg eq ""} {
-                putdc [dict create content $msg embed [dict create \
-                    description "To: $newMsg" \
-                ]] 0 $channelId
+    }
+
+    if {$data eq ""} {
+        if {$oldMsg eq ""} {
+            putGc [dict create content $msg embed [dict create \
+                description "*Could not retrieve message contents*." \
+                color blue \
+            ]] 1
+        } elseif {$oldEmbed eq ""} {
+            set newContent "*Could not retrieve message contents*."
+            putGc [dict create content $msg embed [dict create \
+                description "From: $oldContent\nTo: $newContent" \
+                color blue \
+            ]] 0 $channelId
+        } else {
+            set newContent "*Could not retrieve message contents*."
+            set cmdList {}
+            lappend cmdList [list ::meta::putGc [dict create content \
+                "To: $newContent" \
+            ] 0 $channelId]
+            putGc [dict create content "$msg\nFrom: $oldContent" embed \
+                $oldEmbed \
+            ] 0 $channelId $cmdList
+        }
+    } else {
+        set newContent [dict get $data content]
+        set newEmbed [dict get $data embed]
+
+        if {$newEmbed ne ""} {
+            if {$oldEmbed eq "" && $oldContent eq ""} {
+                set oldContent "*Could not retrieve message contents*."
+                set cmdList {}
+                lappend cmdList [list ::meta::putGc [dict create content \
+                    "To: $newContent" embed $newEmbed \
+                ] 0 $channelId]
+                putGc [dict create content "$msg\nFrom: $oldContent"] 0 \
+                    $channelId $cmdList
             } else {
-                putdc [dict create content $msg embed [dict create \
-                    description "From: $oldMsg\nTo: $newMsg" \
-                    color blue \
-                ]] 0 $channelId
+                set cmdList {}
+                lappend cmdList [list ::meta::putGc [dict create content \
+                    "To: $newContent" embed $newEmbed \
+                ] 0 $channelId]
+                putGc [dict create content "$msg\nFrom: $oldContent" embed \
+                    $oldEmbed \
+                ] 0 $channelId $cmdList
             }
         } else {
-            if {$oldMsg eq ""} {
-                putdc [dict create embed [dict create \
-                    title $msg \
-                    description "*Could not retrieve message contents*." \
-                    color blue \
-                ]] 0 $channelId
+            if {$oldEmbed eq "" && $oldContent eq ""} {
+                set oldContent "*Could not retrieve message contents*."
+                set cmdList {}
+                lappend cmdList [list ::meta::putGc [dict create content \
+                    "To: $newContent" \
+                ] 0 $channelId]
+                putGc [dict create content "$msg\nFrom: $oldContent"] 0 \
+                    $channelId $cmdList
             } else {
-                set newMsg "To: *Could not retrieve message contents*."
-                putdc [dict create content $msg embed [dict create \
-                    description "From: $oldMsg\nTo: $newMsg" \
-                    color blue \
-                ]] 0 $channelId
+                set cmdList {}
+                lappend cmdList [list ::meta::putGc [dict create content \
+                    "To: $newContent" \
+                ] 0 $channelId]
+                putGc [dict create content "$msg\nFrom: $oldContent" embed \
+                    $oldEmbed \
+                ] 0 $channelId $cmdList
             }
         }
     }
 
-    after idle [list ::stats::bump editMsg $guildId $channelId $userId ""]
+    # after idle [list ::stats::bump editMsg $guildId $channelId $userId ""]
 }
 
 # meta::welcome_msg --
@@ -1271,7 +1683,7 @@ proc meta::welcome_msg {guildId userId} {
         set msg "<@$userId> joined $servername."
         set channelId "test"
     }
-    putdc [dict create content $msg] 0 $channelId
+    putGc [dict create content $msg] 0 $channelId
 }
 
 # meta::part_msg --
@@ -1332,12 +1744,12 @@ proc meta::part_msg {guildId userId} {
                     } else {
                         set msg "$msg (*No reason provided*)."
                     }
-                    after idle [list ::stats::bump userKick $guildId "" \
-                            $actionId $userId]
+                    # after idle [list ::stats::bump userKick $guildId "" \
+                    #         $actionId $userId]
                 }
             }
         }
-        putdc [dict create content $msg] 0 $channelId
+        putGc [dict create content $msg] 0 $channelId
     } else {
         set guildData [guild eval {
             SELECT data FROM guild WHERE guildId = :guildId
@@ -1346,11 +1758,11 @@ proc meta::part_msg {guildId userId} {
         set serverName [dict get $guildData name]
         set userName [getUsernameNick $userId $guildId {%s @ %s}]
         if {$userName eq ""} {
-            putdc [dict create content "<@$userId> left $serverName."] 0 \
+            putGc [dict create content "<@$userId> left $serverName."] 0 \
                     $channelId
         } else {
             set msg "<@$userId> ($userName) left $serverName."
-            putdc [dict create content $msg] 0 test
+            putGc [dict create content $msg] 0 test
         }
     }
 }
@@ -1398,7 +1810,7 @@ proc meta::log_ban_remove {guildId userId} {
                 }
             }
         }
-        putdc [dict create content $msg] 0 $channelId
+        putGc [dict create content $msg] 0 $channelId
     } else {
         set guildData [guild eval {
             SELECT data FROM guild WHERE guildId = :guildId
@@ -1414,7 +1826,134 @@ proc meta::log_ban_remove {guildId userId} {
         } else {
             set msg "The ban on <@$userId> has been lifted."
         }
-        putdc [dict create content $msg] 1 test
+        putGc [dict create content $msg] 1 test
+    }
+}
+
+# meta::setupDatabase --
+#
+#   Sets up the meta database and upgrades it if needed based on meta(ver)
+#
+# Arguments:
+#   None
+#
+# Results:
+#   None
+
+proc meta::setupDatabase {} {
+    variable meta
+
+    set metaVersion [metadb eval {
+        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'version'
+    }]
+
+    if {$metaVersion eq ""} {
+        # Either first setup or v0.1
+        set configExists [metadb eval {
+            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'config'
+        }]
+
+        if {$configExists} {
+            # v0.1
+            # Update config first
+            metadb eval {CREATE TABLE tempconfig AS SELECT * FROM config}
+            metadb eval {DROP TABLE config}
+            metadb eval {
+                CREATE TABLE config(
+                    guild_id text,
+                    channel_id text,
+                    type text,
+                    value text
+                )
+            }
+            metadb eval {
+                INSERT INTO config(guild_id, channel_id, type)
+                SELECT guildId, channelId, type FROM tempconfig
+            }
+            metadb eval {DROP TABLE tempconfig}
+
+            # Update banned
+            metadb eval {CREATE TABLE tempbanned AS SELECT * FROM banned}
+            metadb eval {DROP TABLE banned}
+            metadb eval {
+                CREATE TABLE banned(
+                    user_id text,
+                    guild_id text,
+                    reason text,
+                    banned_by text,
+                    date_created text,
+                    date_ban_lifted text
+                )
+            }
+            metadb eval {
+                INSERT INTO banned(user_id)
+                SELECT userId FROM tempbanned
+            }
+            metadb eval {DROP TABLE tempbanned}
+
+            # Delete old chatlogs
+            set oldChatLogs [metadb eval {
+                SELECT name FROM sqlite_master 
+                WHERE type = 'table' AND name LIKE 'chatlog_%'
+            }]
+            foreach table $oldChatLogs {
+                metadb eval "DROP TABLE $table"
+            }
+        } else {
+            # New setup
+            # Create config
+            metadb eval {
+                CREATE TABLE config(
+                    guild_id text,
+                    channel_id text,
+                    type text,
+                    value text
+                )
+            }
+
+            # Create banned
+            metadb eval {
+                CREATE TABLE banned(
+                    user_id text,
+                    reason text,
+                    banned_by text,
+                    date_created text,
+                    date_ban_lifted text
+                )
+            }
+        }
+
+        # Create chatlog
+        metadb eval {
+            CREATE TABLE chatlog(
+                guild_id text,
+                channel_id text,
+                msg_id text,
+                user_id text,
+                content text,
+                embed text,
+                attachment text,
+                pinned text,
+                timestamp int
+            )
+        }
+
+        # Create messages table
+        metadb eval {
+            CREATE TABLE messages(
+                key text,
+                message text
+            )
+        }
+
+        # Create version table
+        metadb eval {
+            CREATE TABLE version(
+                version text
+            )
+        }
+
+        metadb eval {INSERT INTO version VALUES(:meta(ver))}
     }
 }
 
@@ -1435,29 +1974,10 @@ proc meta::bump {event} {
     }
 }
 
-# meta::formatTime --
-#
-#   Formats time to how long ago the provided time is to the present time
-#
-# Arguments:
-#   duration   Unix time to be formatted
-#
-# Results:
-#   Time formatted. E.g. +1 day(s) 2h3m4s
-
-proc meta::formatTime {duration} {
-    set s [expr {$duration % 60}]
-    set i [expr {$duration / 60}]
-    set m [expr {$i % 60}]
-    set i [expr {$i / 60}]
-    set h [expr {$i % 24}]
-    set d [expr {$i / 24}]
-    return [format "%+d day(s) %02dh%02dm%02ds" $d $h $m $s]
-}
-
-# meta::has_perm --
+# meta::hasPerm --
 #
 #   Checks if a user has any one of the specified permissions or is owner
+#   TODO: Check perm hierarchy (guild perm, cat perm, chan perm and member perm)
 #
 # Arguments:
 #   userId       User ID for whom the permission test has to be performed
@@ -1467,9 +1987,9 @@ proc meta::formatTime {duration} {
 #   Boolean      True if the user has any one of the specified permissions or is
 #                owner
 
-proc meta::has_perm {userId permissions} {
+proc meta::hasPerm {userId permissions} {
     upvar guildId guildId
-    
+
     if {$guildId == ""} {return 0}
     set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
     set guildData {*}$guildData
@@ -1478,16 +1998,16 @@ proc meta::has_perm {userId permissions} {
     }
     
     set members [dict get $guildData members]
-    set memObj [lsearch -inline -index {1 3} $members $userId]
-    set mRoles [dict get $memObj roles]
-    
+    foreach member $members {
+        set user [dict get $member user]
+        if {[dict get $user id] == $userId} break
+    }
+    set mRoles [dict get $member roles]
     set guildRoles [dict get $guildData roles]
     
     set permTotal 0
-    dict for {perm value} $::discord::PermissionValues {
-        if {$perm in $permissions} {
-            incr permTotal $value
-        }
+    foreach perm $permissions {
+        incr permTotal [dict get $::discord::PermissionValues $perm]
     }
     
     foreach role $mRoles {
@@ -1515,8 +2035,7 @@ proc meta::has_perm {userId permissions} {
 #              specified format
 
 proc meta::getUsernameNick {userId guildId {fmt {}}} {
-    set userData [guild eval {SELECT data FROM users WHERE userId = :userId}]
-    set userData {*}$userData
+    set userData {*}[guild eval {SELECT data FROM users WHERE userId = :userId}]
     if {[catch {dict get $userData username} username]} {
         set username ""
     } else {
@@ -1534,72 +2053,7 @@ proc meta::getUsernameNick {userId guildId {fmt {}}} {
     return $username
 }
 
-# meta::cleanDebug --
-#
-#   Delete old debug files if there are more than 2 debug files. Executes every
-#   hour
-#
-# Arguments:
-#   None
-#
-# Results:
-#   None
-
-proc meta::cleanDebug {} {
-    set files [lsort -increasing [glob -nocomplain debug.*]]
-    set id 0
-    while {[llength $files] > 2} {
-        if {[catch {file delete -force [lindex $files $id]} res err]} {
-            incr id
-        }
-        set files [glob -nocomplain debug.*]
-    }
-    after 360000 [list ::meta::cleanDebug]
-}
-
-# meta::shuffle --
-#
-#   Shuffles a list. Based on shuffle10a see shuffle10a
-#   https://wiki.tcl-lang.org/page/Shuffle+a+list
-#
-# Arguments:
-#   items     List to be shuffled
-#
-# Results:
-#   items     Shuffled list
-
-proc meta::shuffle {items} {   
-    set len [llength $items]
-    while {$len} {
-        set n [expr {int($len*rand())}]
-        set tmp [lindex $items $n]
-        lset items $n [lindex $items [incr len -1]]
-        lset items $len $tmp
-    }
-    return $items
-}
-
-# meta::channame_clean --
-#
-#   Returns a valid Discord channel name. Discord requires a channel name to
-#   consist of letters, underscores and dashes only
-#
-# Arguments:
-#   name     Name of the channel to be created
-#
-# Results:
-#   name     Valid discord channel name
-
-proc meta::channame_clean {name} {
-    set name [string tolower [regsub -all -nocase -- {[^a-z0-9_-]} $name {}]]
-    if {$name == ""} {
-        return -code error "Invalid channel name"
-    } else {
-        return $name
-    }
-}
-
-# meta::get_user_id --
+# meta::getUserId --
 #
 #   Returns the user ID out from a string that can be a highlight, a username or
 #   a nickname
@@ -1611,7 +2065,7 @@ proc meta::channame_clean {name} {
 #   userId   User ID of the user. If no results are found or more than one
 #            result is found, an empty string is returned.
 
-proc meta::get_user_id {guildId text} {
+proc meta::getUserId {guildId text} {
     set guildData [guild eval {SELECT data FROM guild WHERE guildId = :guildId}]
     set guildData {*}$guildData
     set members [dict get $guildData members]
@@ -1628,6 +2082,161 @@ proc meta::get_user_id {guildId text} {
     }
 }
 
-after idle [list ::meta::cleanDebug]
+# meta::isBanned --
+#
+#   Returns 1 or 0 depending of whether a user is banned or not
+#
+# Arguments:
+#   userId   The user's id.
+#   guildId  The guild id.
+#
+# Results:
+#   bool   1 if the user is banned, 0 otherwise
 
-puts "meta.tcl loaded"
+proc meta::isBanned {userId guildId} {
+    set now [clock seconds]
+    set banned [metadb eval {
+        SELECT 1 FROM banned
+        WHERE user_id = :userId AND 
+        (date_ban_lifted > :now OR date_ban_lifted = '') AND
+        (guildId = '' OR guildId = :guildId)
+        LIMIT 1
+    }]
+    return [expr {$banned == 1}]
+}
+
+# meta::isBot --
+#
+#   Returns 1 or 0 depending of whether a user is a bot or not
+#
+# Arguments:
+#   userId   The user's id.
+#   data     Optional object containing discord information
+#
+# Results:
+#   bool   1 if the user is a bot, 0 otherwise
+
+proc meta::isBot {userId {data {}}} {
+    if {$data == ""} {
+        upvar guildId guildId
+        set guildData {*}[guild eval {
+            SELECT data FROM guild WHERE guildId = :guildId
+        }]
+        set users [dict get $guildData members]
+        if {[catch {dict get $data user bot} bot]} {set bot false}
+    } else {
+        if {[catch {dict get $data author bot} bot]} {set bot false}
+    }
+    return $bot
+}
+
+# meta::isBotAdmin --
+#
+#   Returns 1 or 0 depending of whether a user is a bot admin or not
+#
+# Arguments:
+#   userId   The user's id.
+#
+# Results:
+#   bool   1 if the user is a bot admin, 0 otherwise
+
+proc meta::isBotAdmin {userId} {
+    metadb eval {SELECT value WHERE }
+    return $bot
+}
+
+# meta::sendMsg --
+#
+#   Sends a help or error message to the channel.
+#
+# Arguments:
+#   type   The type of message to send.
+#   param  Optional. Any other informations to include in the message.
+#
+# Results:
+#   None
+
+proc meta::sendMsg {type {param {}}} {
+    variable meta pubCmdArgs
+    set modDate [file mtime $meta(message)]
+    set dbModDate [metadb eval {SELECT value FROM config WHERE type = 'msg'}]
+    set updateMsg 0
+
+    if {$dbModDate != $modDate} {
+        if {$dbModDate == ""} {
+            metadb eval {INSERT INTO config(type, value) VALUES('msg', :mtime)}
+        } else {
+            metadb eval {UPDATE config SET value = :modDate WHERE type = 'msg'}
+        }
+        set f [open $meta(message) r]
+        set msgDict [::json::json2dict [read $f]]
+        close $f
+        
+        metadb eval {DELETE FROM messages}
+        dict for {msgType msg} $msgDict {
+            metadb eval {INSERT INTO messages VALUES(:msgType, :msg)}
+        }
+    }
+
+    set msgBody {*}[metadb eval {
+        SELECT message FROM messages WHERE key = :type
+    }]
+
+    if {$param == ""} {
+        set fields {}
+        switch $type {
+            "setupHelp" {
+                set typeConstraints [dict get $pubCmdArgs setup -type]
+                lappend fields [dict create \
+                    name "Valid types" \
+                    value [join [lindex $typeConstraints 3] {, }] \
+                ]
+            }
+            "banHelp" {
+                set scopeConstraints [dict get $pubCmdArgs ban -scope]
+                lappend fields [dict create \
+                    name "Valid scopes" \
+                    value [join [lindex $scopeConstraints 3] {, }] \
+                ]
+            }
+            "banInfoHelp" {
+                set scopeConstraints [dict get $pubCmdArgs banInfo -scope]
+                lappend fields [dict create \
+                    name "Valid scopes" \
+                    value [join [lindex $scopeConstraints 3] {, }] \
+                ]
+                set viewConstraints [dict get $pubCmdArgs banInfo -view]
+                lappend fields [dict create \
+                    name "Valid columns for view" \
+                    value [join [lindex $viewConstraints 3] {, }] \
+                ]
+            }
+        }
+
+        lappend fields [dict create \
+            name "Synonyms" value [dict get $msgBody synonyms] \
+        ]
+        lappend fields [dict create \
+            name "Example" value [dict get $msgBody example] \
+        ]
+        lappend fields [dict create \
+            name "Required permissions" value [dict get $msgBody required] \
+        ]
+
+        set msg [dict create embed [dict create \
+            title [dict get $msgBody syntax] \
+            description [dict get $msgBody desc] \
+            fields $fields \
+        ]]
+    } else {
+        set msg [dict create embed [dict create \
+            title "Error" \
+            description [join $param "\n"] \
+        ]]
+    }
+    
+    putGc $msg 0
+}
+
+::meta::setupDatabase
+puts "meta.tcl $::meta::meta(ver) loaded"

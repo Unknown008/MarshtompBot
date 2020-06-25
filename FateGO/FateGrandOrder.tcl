@@ -4,7 +4,7 @@
 #       discord; a repository where a master can save their servants and track
 #       required materials
 #
-# Copyright (c) 2019, Jerry Yong
+# Copyright (c) 2019-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -22,19 +22,20 @@ if {![namespace exists meta]} {
 }
 
 namespace eval fgo {
-    sqlite3 fgodb "${scriptDir}/FateGO/fgodb.sqlite3"
+    sqlite3 fgodb "${::scriptDir}/FateGO/fgodb.sqlite3"
 
     set afterIds                   [list]
 
+    variable fgo
     set fgo(cmd)      "!fgo"
     set fgo(ver)      "0.1"
     set fgo(gitIssue) "http://github.com"
-    set fgo(errors)   "${scriptDir}/FateGO/error-messages.json"
-    set fog(timeout)  30000
+    set fgo(errors)   [file join ${::scriptDir} "FateGO" "messages.json"]
+    set fgo(timeout)  30000
     # List of dicts {user {} cmd {} after {} word {}}
     set fgo(listener) [list]
 
-    set fgo(addOpts) {
+    set fgo(servantOpts) {
         {{^-id?$}                  id}
         {{^-n(?:ame)?$}            na}
         {{^-a(?:sc(?:ension)?)?$}  as}
@@ -44,7 +45,7 @@ namespace eval fgo {
         {{^-s(?:kill)?3$}          s3}
     }
     
-    set fgo(lookupOpts) {
+    set fgo(materialOpts) {
         {{^-(?:r(?:ar(?:e|ity))?|s(?:tars?)?)$}   rarity}
         {{^-(?:i(?:mmediate)?|now?)$}               time}
         {{^-c(?:l(?:ass)?)?$}                      class}
@@ -58,16 +59,16 @@ proc fgo::command {} {
     upvar data data text text channelId channelId guildId guildId userId userId
     switch [lindex $text 0] {
         "!fgoservant" {
-            servant $userId [regsub {!fgoservant *} $text ""]
+            servant $userId [regsub {!fgoservant *} $text {}]
         }
-        "!fgolookup" {
-            lookup $userId [regsub {!fgolookup *} $text ""]
+        "!fgomaterial" {
+            material $userId [regsub {!fgomaterial *} $text {}]
         }
         "!fgoshare" {
-            share $userId [regsub {!fgoshare *} $text ""]
+            share $userId [regsub {!fgoshare *} $text {}]
         }
         "!fgoprofile" {
-            manage_profile $userId [regsub {!fgoprofile *} $text ""]
+            manage_profile $userId [regsub {!fgoprofile *} $text {}]
         }
         default {
             set found 0
@@ -92,21 +93,38 @@ proc fgo::command {} {
 
 proc fgo::servant {userId text} {
     switch [lindex $text 0] {
+        c -
+        create -
+        a -
         add {
-            add $userId [regsub {add *} $text ""]
+            addServant $userId [lrange $text 1 end]
+        }
+        e -
+        edit -
+        u -
+        update {
+            # updateServant $userId [lrange $text 1 end]
+        }
+        d -
+        del -
+        delete {
+            # deleteServant $userId [lrange $text 1 end]
+        }
+        default {
+            # fetchServant $userId [lrange $text 1 end]
         }
     }
 }
 
-proc fgo::add {userId data} {
+proc fgo::addServant {userId data} {
     variable fgo
     
     if {$data eq "" || [string tolower $data] eq "help"} {
-        send_error addHelp
+        send_msg addServantHelp
         return
     } elseif {[llength $data] == 2 && [lindex $data 0] eq "-url"} {
         if {[catch {::http::geturl [lindex $data 1]} token]} {
-            send_error addUrlError
+            send_msg addServantUrlError
             return
         }
         set data [::http::data $token]
@@ -114,7 +132,7 @@ proc fgo::add {userId data} {
         import_url $userId $data
         return
     } elseif {[llength $data] ni {6 12}} {
-        send_error addError
+        send_msg addServantError
         return
     }
 
@@ -128,9 +146,9 @@ proc fgo::add {userId data} {
         set servant(s2) ""
         set servant(s3) ""
 
-        foreach option $fgo(addOpts) {
+        foreach option $fgo(servantOpts) {
             set position [lsearch -regexp $data [lindex $option 0]]
-            if {$position > -1 && $position > [llength $data]+1} {
+            if {$position > -1 && $position < [llength $data]+1} {
                 set value [lindex $data $position+1]
                 if {
                     [lindex $option 1] eq "na" &&
@@ -143,7 +161,7 @@ proc fgo::add {userId data} {
                 }
             } else {
                 if {
-                    [lindex $options 1] in "na" ||
+                    [lindex $options 1] eq "na" ||
                     ([lindex $options 1] eq "id" && 
                     [lsearch -regexp $data {-n(?:ame)?}] > -1)
                 } {
@@ -155,14 +173,17 @@ proc fgo::add {userId data} {
                 lappend errors "servant[lindex $option 1]Missing"
             }
         }
+
+        set data [list servant(id) servant(lv) servant(as) servant(s1) \
+            servant(s2) servant(s3)]
     }
 
     if {[validate_servant $data]} {
         lassign $data servant(id) servant(lv) servant(as) servant(s1) \
-                servant(s2) servant(s3)
+            servant(s2) servant(s3)
     }
     if {$errors != ""} {
-        send_error multiple $errors
+        send_msg multiple $errors
         return
     }
 
@@ -181,7 +202,6 @@ proc fgo::add {userId data} {
         )
     }
 
-    set msg "Your servant was successfully added."
     set master [fgodb eval {SELECT 1 FROM master WHERE id = :userId}]
     if {$master == ""} {
         fgodb eval {INSERT INTO master VALUES (
@@ -195,37 +215,88 @@ proc fgo::add {userId data} {
             :now,
             null
         )}
-        append msg " An account for you has automatically been created with " \
-                "the servants you have created since it is your first time " \
-                "registering a servant. Should you wish to delete it, you can" \
-                " use `!fgodelete` to remove all your information saved. " \
-                "If you also want others to see your account, you can turn " \
-                "your account visibility settings on (off by default) by " \
-                "using `!fgoshare on`."
+        send_msg addServantSuccessCreated
+    } else {
+        send_msg addServantSuccess
     }
-
-    ::meta::putdc [dict create content $msg] 0
 }
 
-proc fgo::lookup {userId data} {
+proc fgo::updateServant {userId data} {
+    variable fgo
+
+    if {$data eq "" || [string tolower $data] eq "help"} {
+        send_msg updateHelp
+        return
+    } elseif {[llength $data] == 2 && [lindex $data 0] eq "-url"} {
+        if {[catch {::http::geturl [lindex $data 1]} token]} {
+            send_msg updateServantUrlError
+            return
+        }
+        set data [::http::data $token]
+        ::http::cleanup $token
+        import_url_update $userId $data
+        return
+    } elseif {[llength $data] % 2 != 0} {
+        send_msg updateError
+        return
+    }
+
+    set errors [list]
+
+    if {[string match {-*} [lindex $data 0]]} {
+        set servant(id) ""
+        set servant(as) ""
+        set servant(lv) ""
+        set servant(s1) ""
+        set servant(s2) ""
+        set servant(s3) ""
+
+        set posId [lsearch -regexp $data {-id?|-n(?:ame)?}]
+        if {posId == -1} {
+            send_msg "servantidMissing"
+            return
+        }
+
+        foreach option $fgo(servantOpts) {
+            set position [lsearch -regexp $data [lindex $option 0]]
+            if {$position > -1 && $position < [llength $data]+1} {
+                set value [lindex $data $position+1]
+                if {
+                    [lindex $option 1] eq "na" &&
+                    $servant(id) == "" && 
+                    [lsearch -regexp $data {-id?}] == -1
+                } {
+                    set servant(id) $value
+                } else {
+                    set servant([lindex $option 1]) $value
+                }
+            }
+        }
+
+        set data [list servant(id) servant(lv) servant(as) servant(s1) \
+            servant(s2) servant(s3)]
+    }
+
+    ########
+}
+
+proc fgo::material {userId data} {
     variable fgo
 
     set master [fgodb eval {SELECT 1 FROM master WHERE id = :userId}]
     if {$master == ""} {
-        set msg "You are not registered. Add at least one servant to register "
-        append msg "yourself (use `!fgoadd` to add a servant)."
-        ::meta::putdc [dict create content $msg] 0
+        send_msg meterialNotRegistered
         return
     }
     set servants [list]
     set errors [list]
     set filtered [list]
-    array set filter {} ;# Filter for servant criteria
+    array set filter {}    ;# Filter for servant criteria
     array set filterSvt {} ;# Filter for servant criteria
     array set filterLvl {} ;# Filter for ascension and skill level criteria
 
     if {$data != ""} {
-        foreach option $fgo(lookupOpts) {
+        foreach option $fgo(materialOpts) {
             set position [lsearch -regexp $data [lindex $option 0]]
             if {$position > -1} {
                 switch [lindex $option 1] {
@@ -383,23 +454,20 @@ proc fgo::lookup {userId data} {
             
             if {$valid == 1 && $validSvt == 1} {
                 lappend filtered [list $arr(servant_id) \
-                        $arr(servant_ascension) $arr(servant_skill1_level) \
-                        $arr(servant_skill2_level) $arr(servant_skill3_level)]
+                    $arr(servant_ascension) $arr(servant_skill1_level) \
+                    $arr(servant_skill2_level) $arr(servant_skill3_level)]
             }
         }
     }
     if {$servants == ""} {
-        set msg "You have no servants. You need at least one servant to "
-        append msg "use this command (use `!fgoadd` to add a servant)."
-        ::meta::putdc [dict create content $msg] 0
+        send_msg materialNoServants
         return
     } elseif {$data != ""} {
         if {$errors != ""} {
-            send_error multiple $errors
+            send_msg multiple $errors
             return
         } elseif {$filtered == ""} {
-            set msg "You have no servants matching the query criteria."
-            ::meta::putdc [dict create content $msg] 0
+            send_msg materialNoMatch
             return
         }
         set servants $filtered
@@ -484,7 +552,7 @@ proc fgo::lookup {userId data} {
         append finalMsg "\nResults too long to display more."
     }
     
-    ::meta::putdc [dict create content "```$finalMsg```"] 0
+    ::meta::putGc [dict create content "```$finalMsg```"] 0
 }
 
 proc fgo::share {userId param} {
@@ -495,12 +563,12 @@ proc fgo::share {userId param} {
                 SELECT share FROM master WHERE id = :userId
             }]
             if {$current == 1} {
-                set msg "Your account's sharing setting is already on!"
+                send_msg sharingAlreadyOn
             } elseif {$current == 0} {
                 fgodb eval {UPDATE master SET share = 1}
-                set msg "Account profile share setting turned on."
+                send_msg sharindTurnedOn
             } else {
-                set msg "You do not have a registered account!"
+                send_msg sharingNoAccount
             }
         }
         0 -
@@ -509,19 +577,19 @@ proc fgo::share {userId param} {
                 SELECT share FROM master WHERE id = :userId
             }]
             if {$current == 0} {
-                set msg "Your account's sharing setting is already off!"
+                send_msg sharingAlreadyOn
             } elseif {$current == 1} {
                 fgodb eval {UPDATE master SET share = 0}
-                set msg "Account profile share setting turned off."
+                send_msg sharingAlreadyOff
             } else {
-                set msg "You do not have a registered account!"
+                send_msg sharingNoAccount
             }
         }
         default {
-            set msg "Unrecognised parameter. Usage **!fgoshare _on|off_**"
+            send_msg sharingHelp
         }
     }
-    ::meta::putdc [dict create content $msg] 0
+    ::meta::putGc [dict create content $msg] 0
 }
 
 proc fgo::manage_profile {userId param} {
@@ -531,32 +599,26 @@ proc fgo::manage_profile {userId param} {
         v -
         view {
             profile_view $userId [lrange $param 1 end]
-            return
         }
         e -
         edit {
-            set msg "Sorry this has not been implemented yet."
+            send_msg profileNotImplemented
             #profile_edit $userId [lrange $param 1 end]
-            #return
         }
         d -
         del -
         delete {
             profile_delete $userId
-            return
         }
         find -
         search {
-            set msg "Sorry this has not been implemented yet."
+            send_msg profileNotImplemented
             #profile_search [lrange $param 1 end]
-            #return
         }
         default {
-            set msg "Unrecognised parameter. Usage **!fgoprofile "
-            append msg "_view|edit|delete|search_**"
+            send_msg profileUnrecognized
         }
     }
-    ::meta::putdc [dict create content $msg] 0
 }
 
 proc fgo::profile_view {userId param} {
@@ -569,12 +631,12 @@ proc fgo::profile_view {userId param} {
             FROM master WHERE id = :userId
         }]
         if {$found == ""} {
-            set msg "You don't seem to have an FGO profile registered. An FGO "
-            append msg "profile gets automatically created when you add a "
-            append msg "servant using **!fgoservant add**."
-            ::meta::putdc [dict create content $msg] 0
+            send_msg profileNotRegistered
             return
         }
+    } elseif {$param eq "Help"} {
+        send_msg profileHelp
+        return
     } elseif {[regexp {^<@!?([0-9]+)>$} $param - user]} {
         set found [fgodb eval {
             SELECT
@@ -583,9 +645,7 @@ proc fgo::profile_view {userId param} {
             FROM master WHERE id = :user AND share = 1
         }]
         if {$found == ""} {
-            set msg "No such user found or the user has their profile "
-            append msg "visibility turned off."
-            ::meta::putdc [dict create content $msg] 0
+            send_msg profileNotFound
             return
         }
     } elseif {[regexp {^[^#]+#[0-9]{4}$} $param - tag]} {
@@ -596,13 +656,11 @@ proc fgo::profile_view {userId param} {
             FROM master WHERE tag = :tag AND share = 1
         }]
         if {$found == ""} {
-            set msg "No user matching the provided tag found in my database or "
-            append msg "the user has their profile visibility turned off."
-            ::meta::putdc [dict create content $msg] 0
+            send_msg profileTagNotFound
             return
         }
     } else {
-        # put error
+        send_msg profileUnrecognized
         return
     }
 
@@ -618,7 +676,7 @@ proc fgo::profile_view {userId param} {
         description $desc \
         footer [dict create text [sanitize "$created $updated" time]]
     ]
-    ::meta::putdc [dict create embed $msg] 0
+    ::meta::putGc [dict create embed $msg] 0
 }
 
 proc fgo::profile_edit {userId param} {
@@ -630,8 +688,7 @@ proc fgo::profile_delete {userId} {
 
     set master [fgodb eval {SELECT 1 FROM master WHERE id = :userId}]
     if {$master != ""} {
-        set msg "You were not registered as a master."
-        ::meta::putdc [dict create content $msg] 0
+        send_msg profileNotRegistered
         return
     }
 
@@ -640,8 +697,8 @@ proc fgo::profile_delete {userId} {
     incr ::listener
     set afterId [after $fgo(timeout) ::fgo::profile_delete_confirm $userId "N"]
     lappend fgo(listener) [dict create user $userId cmd \
-            [list profile_delete_confirm $userId] after $afterId word {Y N}]
-    ::meta::putdc [dict create content $msg] 0
+        [list profile_delete_confirm $userId] after $afterId word {Y N}]
+    ::meta::putGc [dict create content $msg] 0
 }
 
 proc fgo::profile_delete_confirm {userId text {afterId {}}} {
@@ -652,20 +709,17 @@ proc fgo::profile_delete_confirm {userId text {afterId {}}} {
             after cancel $afterId
             fgodb eval {DELETE FROM master WHERE id = :userId}
             fgodb eval {DELETE FROM master_servant WHERE master_id = :userId}
-            set msg "Your profile has been deleted as requested."
+            send_msg pofileDeleted
         }
         N {
             if {$afterId == ""} {
-                set msg "Operation timeout. Deletion of your profile has been "
-                append msg "cancelled."
+                send_msg profileDeleteTimeout
             } else {
                 after cancel $afterId
-                set msg "Deletion of your profile has been cancelled as "
-                append msg "requested."
+                send_msg profileDeleteCancelled
             }
         }
     }
-    ::meta::putdc [dict create content $msg] 0
 }
 
 proc fgo::profile_search {param} {
@@ -682,7 +736,7 @@ proc fgo::import_url {userId fullData} {
         set data [split [string trim $data] ","]
 
         if {![validate_servant $data]} {
-            send_error multiple $errors
+            send_msg multiple $errors
             return
         }
         lappend addServants $data
@@ -726,7 +780,7 @@ proc fgo::import_url {userId fullData} {
     }
 
     set master [fgodb eval {SELECT 1 FROM master WHERE id = :userId}]
-    set msg "Your servants were successfully added"
+    
     if {$master == ""} {
         fgodb eval {INSERT INTO master VALUES (
             :userId,
@@ -739,23 +793,19 @@ proc fgo::import_url {userId fullData} {
             :now,
             null
         )}
-        append msg ". An account for you has automatically been created with " \
-                "the servants you have created since it is your first time " \
-                "registering a servant. Should you wish to delete it, you can" \
-                " use `!fgodelete` to remove all your information saved. " \
-                "If you also want others to see your account, you can turn " \
-                "your account visibility settings on (off by default) by " \
-                "using `!fgoshare on`."
+        send_msg addServantSuccessCreated
     } else {
-        append msg " and/or updated."
+        send_msg addServantSuccess
     }
+}
 
-    ::meta::putdc [dict create content $msg] 0
+proc fgo::import_url_update {userId fullData} {
+
 }
 
 proc fgo::validate_servant {data} {
     lassign $data servant(id) servant(lv) servant(as) servant(s1) servant(s2) \
-            servant(s3)
+        servant(s3)
     
     set errors [list]
     
@@ -811,11 +861,11 @@ proc fgo::validate_servant {data} {
     }
 
     uplevel [list set data [list $servant(id) $servant(lv) $servant(as) \
-            $servant(s1) $servant(s2) $servant(s3)]]
+        $servant(s1) $servant(s2) $servant(s3)]]
     return 1
 }
 
-proc fgo::send_error {type {param {}}} {
+proc fgo::send_msg {type {param {}}} {
     variable fgo
     set file [open $fgo(errors) r]
     set errorDict [::json::json2dict [read $file]]
@@ -865,11 +915,16 @@ proc fgo::send_error {type {param {}}} {
             }
         }
         default {
-            set msg [subst [dict get $errorDict $type]]
+            if {[dict exists $errorDict $type]} {
+                set msg [subst [dict get $errorDict $type]]
+            } else {
+                puts "FateGrandOrder send_msg error: No such error type $type"
+                return
+            }
         }
     }
     
-    ::meta::putdc [dict create content $msg] 0
+    ::meta::putGc [dict create content $msg] 0
 }
 
 proc fgo::sanitize {word {type {}}} {
@@ -879,7 +934,7 @@ proc fgo::sanitize {word {type {}}} {
         }
         "time" {
             set created [clock format [lindex $word 0] -format \
-                    "%a %d %b %Y %T UTC" -timezone UTC]
+                "%a %d %b %Y %T UTC" -timezone UTC]
             set msg "Created on $created"
             if {[lindex $word 1] ne ""} {
                 set updated [clock format [lindex $word 1] -format \
@@ -894,7 +949,7 @@ proc fgo::sanitize {word {type {}}} {
     }
 }
 
-proc fgo::pre_rehash {} {
+proc fgo::pre_reboot {} {
     variable afterIds
     foreach id $afterIds {
         after cancel $id

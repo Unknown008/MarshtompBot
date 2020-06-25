@@ -3,7 +3,7 @@
 #       This file implements the Tcl code for managing and running a game of War
 #       of the Seas
 #
-# Copyright (c) 2018, Jerry Yong
+# Copyright (c) 2018-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -87,7 +87,7 @@ proc wots::command {} {
   set disabledC \
     {*}[wotsdb eval {SELECT value FROM config WHERE param = 'disabledChans'}]
   if {$userId in $banned} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "You are not allowed to begin a game of War of the Seas."] 0
     return 0
   } elseif {
@@ -104,7 +104,7 @@ proc wots::command {} {
       } {
         set msg "Sorry, I don't have the permissions on this server to manage "
         append msg "channels. I cannot create a game of Wars of the Seas."
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return
       }
       create_game $userId $guildId
@@ -117,16 +117,16 @@ proc wots::command {} {
     
     "!wotshelp" {
       set msg "Command usage can be found here: $game(help)"
-      ::meta::putdc [dict create content $msg] 0
+      ::meta::putGc [dict create content $msg] 0
     }
     "!wotsset" {
       if {![::meta::hasPerm $userId {ADMINISTRATOR MANAGE_GUILD}]} {
         set msg "You need at least the \"Manage Guild\" permission to use this "
         append msg "command."
-        ::meta::putdc [dict create content $msg] 0
+        ::meta::putGc [dict create content $msg] 0
         return 0
       }
-      settings $guildId $channelId $userId {*}[regsub {!wotsset } $text ""]
+      settings $guildId $channelId $userId {*}[regsub {!wotsset } $text {}]
     }
     
     "!wotspause" {
@@ -171,7 +171,7 @@ proc wots::create_game {userId guildId} {
   variable game
   
   if {$guildId in [dict keys $game(sessions)]} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "A game of War of the Seas is already running!"] 0
     return
   }
@@ -257,7 +257,7 @@ proc wots::create_game {userId guildId} {
   set msg "<@$userId> is hosting a game of War of the Seas. Type `!join` to "
   append msg "join the game, you have [expr {$game(jointimeout)/1000}] seconds "
   append msg "to join. Up to 3 additional players can join the game."
-  ::meta::putdc [dict create content $msg] 0 $channelId
+  ::meta::putGc [dict create content $msg] 0 $channelId
   
   set afterId [after $game(jointimeout) [list coroutine \
     ::wots::check_game[::id] ::wots::check_game $guildId $channelId $userId]]
@@ -275,7 +275,7 @@ proc wots::join_game {guildId channelId userId} {
     return
   } elseif {$userId in [dict get $game(sessions) $guildId playerlist]} {
     set msg "You have already joined the game!"
-    ::meta::putdc [dict create content $msg] 0 $channelId
+    ::meta::putGc [dict create content $msg] 0 $channelId
     return
   }
   
@@ -294,7 +294,7 @@ proc wots::join_game {guildId channelId userId} {
       lappend playerlist $userId
       dict set game(sessions) $guildId playerlist $playerlist
       
-      ::meta::putdc [dict create content "<@$userId> joins the game!"] 0
+      ::meta::putGc [dict create content "<@$userId> joins the game!"] 0
       if {[llength $cplayers] == 4} {
         start_game $guildId $channelId [dict get [lindex $cplayers 0] player]
       }
@@ -303,7 +303,7 @@ proc wots::join_game {guildId channelId userId} {
       set msg "You cannot join the current game of War of the Seas anymore. "
       append msg "Please wait until the game is over and host or join the next "
       append msg "one."
-      ::meta::putdc [dict create content $msg] 0 $channelId
+      ::meta::putGc [dict create content $msg] 0 $channelId
     }
   }
 }
@@ -330,7 +330,7 @@ proc wots::drop_player {guildId channelId userId {target ""} {silent 0}} {
     set members [dict get $guildData members]
     set data [lsearch -inline -nocase $members "*$target*"]
     if {$data == ""} {
-      ::meta::putdc [dict create content "No such user found."] 0
+      ::meta::putGc [dict create content "No such user found."] 0
       return
     } else {
       set targetId [dict get $data user id]
@@ -338,7 +338,7 @@ proc wots::drop_player {guildId channelId userId {target ""} {silent 0}} {
   }
   
   if {$targetId ni [dict get $game(sessions) $guildId playerlist]} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "$target is not currently in a game of War of the Seas."] 0
     return
   }
@@ -357,7 +357,7 @@ proc wots::drop_player {guildId channelId userId {target ""} {silent 0}} {
     append msg "game? (Y/N)"
   }
   incr ::listener
-  ::meta::putdc [dict create content $msg] 0 $channelId
+  ::meta::putGc [dict create content $msg] 0 $channelId
 }
 
 proc wots::start_game {guildId channelId userId} {
@@ -454,7 +454,7 @@ proc wots::start_game {guildId channelId userId} {
     lset players $i $player
   }
   
-  set pile [::meta::shuffle $game(deck)]
+  set pile [::util::shuffle $game(deck)]
   
   # Deal cards
   for {set i 0} {$i < [llength $players]} {incr i} {
@@ -500,7 +500,7 @@ proc wots::stop_game {guildId channelId userId {silent 0}} {
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can stop an ongoing game of War of the Seas, "
       append msg "unless the game host is offline."
-      ::meta::putdc [dict create content $msg] 0 $channelId
+      ::meta::putGc [dict create content $msg] 0 $channelId
       return
     } elseif {$userId ni [dict get $game(sessions) $guildId playerlist]} {
       return
@@ -516,7 +516,7 @@ proc wots::stop_game {guildId channelId userId {silent 0}} {
     dict set game(sessions) $guildId listeners $listeners
     set msg "Are you sure you want to stop the current game? (Y/N)"
     incr ::listener
-    ::meta::putdc [dict create content $msg] 0 $channelId
+    ::meta::putGc [dict create content $msg] 0 $channelId
   }
 }
 
@@ -1575,7 +1575,7 @@ proc wots::pause {guildId channelId userId} {
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can pause an ongoing game of War of the Seas,"
       append msg "unless the game host is offline."
-      ::meta::putdc [dict create content $msg] 0 $channelId
+      ::meta::putGc [dict create content $msg] 0 $channelId
         
       return
     } elseif {$userId ni [dict get $game(sessions) $guildId playerlist]} {
@@ -1619,7 +1619,7 @@ proc wots::resume {guildId channelId userId} {
     if {$idx != -1 && [dict get [lindex $presences $idx] status] ne "offline"} {
       set msg "Only the game host can pause an ongoing game of War of the Seas,"
       append msg "unless the game host is offline."
-      ::meta::putdc [dict create content $msg] 0 $channelId
+      ::meta::putGc [dict create content $msg] 0 $channelId
       return
     } elseif {$userId ni [dict get $game(sessions) $guildId playerlist]} {
       return
@@ -1654,7 +1654,7 @@ proc wots::resume {guildId channelId userId} {
 ##
 proc wots::announce {guildId msg} {
   variable game
-  ::meta::putdc [dict create content [card_mask $msg]] 0 \
+  ::meta::putGc [dict create content [card_mask $msg]] 0 \
     [dict get $game(sessions) $guildId chan]
   foreach player [dict get $game(sessions) $guildId players] {
     private_say [dict get $player chan] [dict get $player player] $msg
@@ -1665,15 +1665,15 @@ proc wots::private_say {channelId userId msg} {
   variable game
   set msg [youify $userId $msg]
   if {$channelId == "DM"} {
-    ::meta::putdcPM $userId [dict create content $msg] 0
+    ::meta::putDm $userId [dict create content $msg] 0
   } elseif {$channelId != ""} {
-    ::meta::putdc [dict create content $msg] 0 $channelId
+    ::meta::putGc [dict create content $msg] 0 $channelId
   }
 }
 
 proc wots::card_mask {text} {
   if {[regexp {has set \w+ \d+} $text]} {
-    regsub {has set \w+ \d+} $text "has set a card" text
+    regsub {has set \w+ \d+} $text {has set a card} text
   }
   return $text
 }
@@ -1697,11 +1697,11 @@ proc wots::youify {userId text} {
     "The card ability of you" "Your card's ability"
     "draws" "draw"
   }
-  if {[regsub -all -- "<@$userId>( \\w+)?" $text \
+  if {[regsub -all "<@$userId>( \\w+)?" $text \
     [format {you[string map {%s} "\1"]} $mappings] text] > 0} {
     set text [subst $text]
     set text [string map $secondary $text]
-    regsub -all -- {(^|[.!?] )you(r)?\y} $text {\1You\2} text
+    regsub -all {(^|[.!?] )you(r)?\y} $text {\1You\2} text
   } else {
     set text [card_mask $text]
   }
@@ -1791,7 +1791,7 @@ proc wots::settings {guildId channelId userId args} {
         } elseif {[string is false -strict $value]} {
           disable_guild $guildId $channelId $userId
         } else {
-          ::meta::putdc [dict create content $msg] 0
+          ::meta::putGc [dict create content $msg] 0
         }
       }
       channel {
@@ -1802,7 +1802,7 @@ proc wots::settings {guildId channelId userId args} {
         } elseif {[string is false -strict $value]} {
           disable_channel $guildId $channelId $userId $channels
         } else {
-          ::meta::putdc [dict create content $msg] 0
+          ::meta::putGc [dict create content $msg] 0
         }
       }
       ban {
@@ -1813,7 +1813,7 @@ proc wots::settings {guildId channelId userId args} {
         } elseif {[string is false -strict $value]} {
           unban_user $guildId $channelId $userId $users
         } else {
-          ::meta::putdc [dict create content $msg] 0
+          ::meta::putGc [dict create content $msg] 0
         }
       }
       category {
@@ -1834,7 +1834,7 @@ proc wots::ban_user {guildId channelId userId targets} {
     if {[regexp {^<@!?([0-9]+)>$} $target - user]} {
       set targetId $user
     } elseif {$target == ""} {
-      ::meta::putdc \
+      ::meta::putGc \
         [dict create content "Error: User to ban was not mentioned."] 0
       return
     } else {
@@ -1845,7 +1845,7 @@ proc wots::ban_user {guildId channelId userId targets} {
       set members [dict get $guildData members]
       set data [lsearch -inline -nocase $members "*$target*"]
       if {$data == ""} {
-        ::meta::putdc [dict create content "No such user found."] 0
+        ::meta::putGc [dict create content "No such user found."] 0
         return
       } else {
         set targetId [dict get $data user id]
@@ -1856,7 +1856,7 @@ proc wots::ban_user {guildId channelId userId targets} {
       SELECT value FROM config WHERE param = 'bannedUsers'
     }]
     if {$targetId in $banned} {
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "<@$targetId> is already banned from War of the Seas."] 0
     } else {
       lappend banned $targetId
@@ -1868,10 +1868,10 @@ proc wots::ban_user {guildId channelId userId targets} {
     }
   }
   if {[llength $banned] == 1} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "[join banned] has been banned from War of the Seas."] 0
   } elseif {[llength $banned] > 1} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "[join banned {, }] have been banned from War of the Seas."] 0
   }
 }
@@ -1882,7 +1882,7 @@ proc wots::unban_user {guildId channelId userId targets} {
     if {[regexp {^<@!?([0-9]+)>$} $target - user]} {
       set targetId $user
     } elseif {$target == ""} {
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "Error: User to ban was not mentioned."] 0
       return
     } else {
@@ -1893,7 +1893,7 @@ proc wots::unban_user {guildId channelId userId targets} {
       set members [dict get $guildData members]
       set data [lsearch -inline -nocase $members "*$target*"]
       if {$data == ""} {
-        ::meta::putdc [dict create content "No such user found."] 0
+        ::meta::putGc [dict create content "No such user found."] 0
         return
       } else {
         set targetId [dict get $data user id]
@@ -1905,7 +1905,7 @@ proc wots::unban_user {guildId channelId userId targets} {
     }]
     set idx [lsearch $banned $targetId]
     if {$idx == -1} {
-      ::meta::putdc [dict create content "<@$targetId> is not banned."] 0
+      ::meta::putGc [dict create content "<@$targetId> is not banned."] 0
     } else {
       set banned [lreplace $banned $idx $idx]
       wotsdb eval {
@@ -1915,10 +1915,10 @@ proc wots::unban_user {guildId channelId userId targets} {
     }
   }
   if {[llength $unbanned] == 1} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "[join unbanned] has been unbanned from War of the Seas."] 0
   } elseif {[llength $banned] > 1} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "[join unbanned {, }] have been unbanned from War of the Seas."] 0
   }
 }
@@ -1930,7 +1930,7 @@ proc wots::disable_guild {guildId channelId userId} {
   lappend guilds $guildId
   wotsdb eval {UPDATE config SET value = :guilds WHERE param = 'disabledGuilds'}
   
-  ::meta::putdc [dict create content \
+  ::meta::putGc [dict create content \
     "War of the Seas has been disabled on this server."] 0
   kill_game $guildId $channelId $userId 0 "Y"
 }
@@ -1941,14 +1941,14 @@ proc wots::enable_guild {guildId channelId userId} {
   }]
   set idx [lsearch $guilds $guildId]
   if {$idx == -1} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "War of the Seas is already enabled on this server."] 0
   } else {
     set guilds [lreplace $guilds $idx $idx]
     wotsdb eval {
       UPDATE config SET value = :guilds WHERE param = 'disabledGuilds'
     }
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "War of the Seas has been enabled on this server."] 0
   }
 }
@@ -1960,7 +1960,7 @@ proc wots::disable_channel {guildId channelId userId {others ""}} {
   if {$others == ""} {
     lappend chans $channelId
     wotsdb eval {UPDATE config SET value = :chans WHERE param = 'disabledChans'}
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
       "War of the Seas has been disabled on this channel."] 0
   } else {
     set done [list]
@@ -1991,7 +1991,7 @@ proc wots::disable_channel {guildId channelId userId {others ""}} {
       append msg [join $skip {, }]
       lappend parts $msg
     }
-    ::meta::putdc [dict create content [join $parts "\n"]] 0
+    ::meta::putGc [dict create content [join $parts "\n"]] 0
   }
 }
 
@@ -2002,14 +2002,14 @@ proc wots::enable_channel {guildId channelId userId {others ""}} {
   if {$others == ""} {
     set idx [lsearch $chans $channelId]
     if {$idx == -1} {
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "War of the Seas is already enabled on this channel."] 0
     } else {
       set chans [lreplace $chans $idx $idx]
       wotsdb eval {
         UPDATE config SET value = :chans WHERE param = 'disabledChans'
       }
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "War of the Seas has been enabled on this channel."] 0
     }
   } else {
@@ -2041,7 +2041,7 @@ proc wots::enable_channel {guildId channelId userId {others ""}} {
       append msg [join $skip {, }]
       lappend parts $msg
     }
-    ::meta::putdc [dict create content [join $parts "\n"]] 0
+    ::meta::putGc [dict create content [join $parts "\n"]] 0
   }
 }
 
@@ -2049,7 +2049,7 @@ proc wots::default_category {guildId channelId userId category} {
   set cDefault [wotsdb eval {
     SELECT category FROM preferences WHERE guildId = :guildId
   }]
-  set newcategory [::meta::channame_clean $category]
+  set newcategory [::util::cleanChanName $category]
   
   if {$cDefault == ""} {
     wotsdb eval {INSERT INTO preferences VALUES (:guildId, :newcategory, '')}
@@ -2063,9 +2063,9 @@ proc wots::default_category {guildId channelId userId category} {
       append msg "applying Discord's category name restrictions of only "
       append msg "lowercase alphanumeric characters, underscores and dashes "
       append msg "allowed)."
-      ::meta::putdc [dict create content $msg] 0
+      ::meta::putGc [dict create content $msg] 0
     } else {
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "The default category name is already set to $category."] 0
     }
     return
@@ -2077,14 +2077,14 @@ proc wots::default_category {guildId channelId userId category} {
     append msg "underscores and dashes allowed), however. The new category name"
     append msg " is $newcategory"
   }
-  ::meta::putdc [dict create content $msg] 0
+  ::meta::putGc [dict create content $msg] 0
 }
 
 proc wots::default_channel {guildId channelId userId channel} {
   set cDefault [wotsdb eval {
     SELECT channel FROM preferences WHERE guildId = :guildId
   }]
-  set newchannel [::meta::channame_clean $channel]
+  set newchannel [::util::cleanChanName $channel]
   
   if {$cDefault == ""} {
     wotsdb eval {INSERT INTO preferences VALUES (:guildId, '', :newchannel)}
@@ -2098,9 +2098,9 @@ proc wots::default_channel {guildId channelId userId channel} {
       append msg "applying Discord's channel name restrictions of only"
       append msg "lowercase alphanumeric characters, underscores and dashes"
       append msg "allowed)."
-      ::meta::putdc [dict create content $msg] 0
+      ::meta::putGc [dict create content $msg] 0
     } else {
-      ::meta::putdc [dict create content \
+      ::meta::putGc [dict create content \
         "The default channel name is already set to $channel."] 0
     }
     return
@@ -2112,7 +2112,7 @@ proc wots::default_channel {guildId channelId userId channel} {
     append msg "underscores and dashes allowed), however. The new channel name "
     append msg "is $newchannel"
   }
-  ::meta::putdc [dict create content $msg] 0
+  ::meta::putGc [dict create content $msg] 0
 }
 
 puts "WarOfTheSeas.tcl v0.5 loaded"

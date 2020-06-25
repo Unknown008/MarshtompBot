@@ -13,24 +13,18 @@ exec tclsh8.6 "$0" "${1+"$@"}"
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
 
+################################################################################
+### Begin imports                                                            ###
+################################################################################
 package require Tcl 8.6
 package require sqlite3
 package require logger
+package require json
 
+# Add parent directory to auto_path to load the discord package.
 set scriptDir [file dirname [info script]]
-# Add parent directory to auto_path so that Tcl can find the discord package.
-switch $tcl_platform(os) {
-    {Windows NT} {
-        lappend ::auto_path "${scriptDir}/../discord.tcl/"
-    }
-    {Linux} {
-        lappend ::auto_path "$scriptDir/../discord/" "$scriptDir/../tls1.6.7"
-        source "$scriptDir/../tls1.6.7/http-2.8.11.tm"
-    }
-}
+lappend ::auto_path [file join $scriptDir .. discord.tcl]
 package require discord
-# Set ownerId and token variables
-source "${scriptDir}/private.tcl"
 
 # https://discordapp.com/developers/applications/me
 # Prod
@@ -38,75 +32,109 @@ source "${scriptDir}/private.tcl"
 # Dev
 # https://stillwaters.page.link/marshtomp-beta-bot-invite
 
-###### Custom stuff here ######
-source [file join $scriptDir meta/meta.tcl]
-set modules {
-    custom/custom.tcl           custom
-    pokedex/pokedex.tcl         pokedex
-    pokebattle/pokebattle.tcl   pokebattle
-    stats/stats.tcl             stats
-    pogo/pogo.tcl               pogo
-    anime-manga/anime-manga.tcl anime
-    FateGO/FateGrandOrder.tcl   fgo
+if {![file exists [file join $scriptDir meta meta.tcl]]} {
+    puts "Error booting up: ./meta/meta.tcl file missing."
+    exit
+}
+source [file join $scriptDir meta meta.tcl]
+
+if {![file exists [file join $scriptDir meta util.tcl]]} {
+    puts "Error booting up: ./meta/util.tcl file missing."
+    exit
+}
+source [file join $scriptDir meta util.tcl]
+
+################################################################################
+### Global variables                                                         ###
+################################################################################
+
+if {![file exists "settings.json"]} {
+    puts "Error booting up: settings.json file missing."
+    exit
+}
+set settingsFile [open "settings.json" r]
+set settingsJson [read $settingsFile]
+close $settingsFile
+regsub -all -line {^ *//.*$} $settingsJson {} settingsJson
+if {[catch {json::json2dict $settingsJson} settings]} {
+    puts "Settings file could not be parsed; json structure broken"
+    exit
 }
 
-foreach {module namespace} $modules {
-    source [file join $scriptDir $module]
+set ownerId [dict get $settings owner_id]
+set ownerTag [dict get $settings owner_tag]
+set token [dict get $settings token]
+# Variable controlling user response
+set listener 0
+# Array containing module imported public commands
+array set bindings {}
+# Array containing guild prefixes
+array set prefix {}
+# Array containing commands to be executed on specific gateway events
+array set eventExecute {}
+# List of special commands not following usual command prefix
+set specialCmds {!reboot !shutdown}
+# List of commands to execute for any and all events
+set allEventExec {}
+
+unset -nocomplain settingsFile settingsJson
+
+################################################################################
+### Loading additional modules                                               ###
+################################################################################
+
+foreach module [dict get $settings modules] {
+    set path [file join $scriptDir {*}[file split [dict get $module path]]]
+    if {![file exists $path]} {
+        set msg "Error loading modules: $path file missing and thus module "
+        append msg "[dict get $module module_name] will not be loaded."
+        puts $msg
+        continue
+    }
+    source $path
 }
 
-# Set to 1 if bot is expecting an answer (excluding commands)
-set ::listener 0
+unset -nocomplain module path msg
 
-###### End custom stuff ######
+################################################################################
+### Setting up logs                                                          ###
+################################################################################
 
 set log [logger::init tclqBot]
-${log}::setlevel debug
+${log}::setlevel [dict get $settings log_level]
 
-# Open sqlite3 database
-sqlite3 infoDb "${scriptDir}/info.sqlite3"
-infoDb eval {
-    CREATE TABLE IF NOT EXISTS procs(
-        guildId TEXT,
-        name BLOB,
-        args BLOB,
-        body BLOB,
-        UNIQUE(guildId, name) ON CONFLICT REPLACE
-    )
-}
-infoDb eval {
-    CREATE TABLE IF NOT EXISTS vars(
-        guildId TEXT PRIMARY KEY,
-        list BLOB
-    )
-}
-infoDb eval {
-    CREATE TABLE IF NOT EXISTS bot(
-        guildId TEXT PRIMARY KEY,
-        trigger BLOB
-    )
-}
-infoDb eval {
-    CREATE TABLE IF NOT EXISTS perms(
-        guildId TEXT,
-        userId TEXT PRIMARY KEY,
-        allow BLOB
-    )
-}
-infoDb eval {
-    CREATE TABLE IF NOT EXISTS callbacks(
-        guildId TEXT PRIMARY KEY,
-        dict BLOB
-    )
-}
-infoDb eval {
-    CREATE INDEX IF NOT EXISTS procsGuildIdIdx ON procs(guildId)
-}
+# logToFile --
+#
+#   Called whenever discord::log is called at and above the set log level and 
+#   writes the message to discord.log
+#
+# Arguments:
+#   text      The log message
+#
+# Results:
+#   None
 
-proc logDebug { text } {
+proc logToFile {text} {
     variable debugFile
     variable debugLog
-    variable maxSize
-    if {[file size $debugFile] >= $maxSize} {
+    variable maxLogSize
+
+    regexp {([^:]+)$} [lindex [info level -1] 0] caller
+    set namespace "::[string trimleft [uplevel 1 {namespace current}] {:}]"
+    set caller "${namespace}::$caller"
+
+    set type ""
+    if {![catch {dict get [info frame -1] proc} type]} {
+        regexp {([^:]+)cmd} $type - type
+    } else {
+        puts "logToFile Error: frame doesn't contain proc: $type"
+        return
+    }
+    if {$type ni $::discord::logLevels} {
+        puts "logToFile Error: '$type' not recognised"
+        return
+    }
+    if {[file size $debugFile] >= $maxLogSize} {
         close $debugLog
         set fileName "${debugFile}.[clock milliseconds]"
         if {[catch {file copy $debugFile $fileName} res]} {
@@ -124,55 +152,88 @@ proc logDebug { text } {
             puts stderr $debugLog
             set debugLog {}
         }
+
+        set files [lsort -increasing [glob -nocomplain discord.log.*]]
+        set id 0
+        while {[llength $files] > 2 && $id < [llength $files]} {
+            if {[catch {file delete -force [lindex $files $id]} res err]} {
+                incr id
+            }
+            set files [glob -nocomplain debug.*]
+        }
     }
     if {$debugLog eq {}} {
         return
     }
-    puts $debugLog "[clock format [clock seconds] -format {[%Y-%m-%d %T]}] $text"
+    regsub {^(?:-_logger::service \S+ )+\{(.+)\}} $text {\1} text
+    set text "\[$type\] \[$caller\] $text"
+    puts $debugLog \
+        "[clock format [clock seconds] -format {[%Y-%m-%d %T]}] $text"
     flush $debugLog
 }
+
+set debugFile [file join $scriptDir discord.log]
+set debugLog {}
+set maxLogSize [expr {[dict get $settings max_log_size] * 1024**2}]
+
+if {[catch {open $debugFile "a"} debugLog]} {
+    puts stderr $debugLog
+} else {
+    foreach level $::discord::logLevels {
+        ${discord::log}::logproc $level ::logToFile
+    }
+}
+
+discord::gateway logWsMsg [dict get $settings log_websocket] \
+    [dict get $settings websocket_log_level]
+${discord::log}::setlevel [dict get $settings log_level]
+
+################################################################################
+### The gory stuff                                                           ###
+################################################################################
 
 # Lambda for "unique" number
 coroutine id apply {{} {
     set x 0
     while 1 {
         yield $x
-        incr x
+        if {$x >= 1000} {
+            set x 0
+        } else {
+            incr x
+        }
     }
 }}
 
-proc handleDMEvnt {sessionNs data text} {
+proc handleDMEvnt {data text} {
     set channelId [dict get $data channel_id]
     set userId [dict get $data author id]
     ::meta::command $data $text $channelId "" $userId
 }
 
-proc handleChanEvnt {sessionNs data text} {
+proc handleChanEvnt {data text cmd} {
     set channelId [dict get $data channel_id]
     set guildId [dict get $data guild_id]
     set userId [dict get $data author id]
-    switch -regexp -nocase -- $text {
-        {^o/} {
-            if {$userId == $::ownerId} {::custom::wave $channelId}
+
+    switch $text {
+        "!reboot" {
+            reboot $userId $channelId
         }
-        {^@delete} {
-            set msg_id [dict get $data id]
-            ::meta::log_delete $guildId $msg_id $channelId
-        }
-        {^@msgedit} {
-            ::meta::log_msg_edit $data
+        "!shutdown" {
+            shutdown $userId $channelId [lindex $text 1]
         }
         default {
-            if {$text == "!reboot"} {
-                reboot $userId $channelId
-                return
+            if {[info exists ::bindings($cmd)]} {
+                set ns $::bindings($cmd)
+                ${ns}::command $data [lreplace $text 0 0 $cmd] $channelId \
+                    $guildId $userId
             }
-            ::meta::command $data $text $channelId $guildId $userId
         }
     }
 }
 
-proc handleGuildEvnt {sessionNs data text} {
+proc handleGuildEvnt {data text} {
     set guildId [dict get $data guild_id]
     set userId [dict get $data user id]
     switch -regexp -- $text {
@@ -194,86 +255,76 @@ proc handleGuildEvnt {sessionNs data text} {
     }
 }
 
-proc messageCreate { sessionNs event data } {
+proc messageCreate {guildId channelId event data} {
     set content [dict get $data content]
     set channelId [dict get $data channel_id]
-    if {$channelId in [dict keys [set ${sessionNs}::dmChannels]]} {
-        coroutine handleDMEvnt[::id] handleDMEvnt $sessionNs $data $content
+    if {$guildId eq ""} {
+        coroutine handleDMEvnt[::id] handleDMEvnt $data $content
         return
     }
-    set guildId [guild eval {
-        SELECT guildId FROM chan WHERE channelId = :channelId
-    }]
 
-    if {[string match "!*" $content] || $content eq "o/" || $::listener > 0} {
-        coroutine handleChanEvnt[::id] handleChanEvnt $sessionNs $data $content
+    if {$content in $::specialCmds} {
+        coroutine handleChanEvnt[::id] handleChanEvnt $data $content ""
+        return
+    }
+
+    set cmds [lmap b [array names ::bindings] {
+        if {![info exists ::prefix($guildId)]} {
+            set ::prefix($guildId) "!"
+        }
+        set b $::prefix($guildId)$b
+    }]
+    set cmd [lindex $content 0]
+
+    if {$cmd in $cmds || $::listener > 0} {
+        set cmd [string range $cmd [string length $::prefix($guildId)] end]
+        coroutine handleChanEvnt[::id] handleChanEvnt $data $content $cmd
     }
 }
 
-proc ::mainCallbackHandler {sessionNs event data} {
-    ::meta::bump $event
-     switch $event {
+proc mainCallbackHandler {sessionNs event data} {
+    foreach cmd $::allEventExec {
+        {*}[subst $cmd]
+    }
+    switch $event {
         GUILD_CREATE {
-            ::meta::build_logs
             after idle [list coroutine ::meta::update_members[::id] \
                 ::meta::update_members]
+            puts "Ready"
+            # welcome msg & helpful things
         }
-        CHANNEL_CREATE {
-            ::meta::build_logs [dict get $data id]
-        }
+        CHANNEL_CREATE {}
         MESSAGE_CREATE {
+            foreach cmd $::eventExecute($event) {
+                {*}[subst $cmd]
+            }
             set channelId [dict get $data channel_id]
-            if {$channelId in [dict keys [set ${sessionNs}::dmChannels]]} {
-                set guildId $channelId
-            } else {
-                set guildId [guild eval {
-                    SELECT guildId FROM chan WHERE channelId = :channelId
-                }]
+            if {[catch {dict get $data guild_id} guildId]} {
+                set guildId ""
             }
-            set content [dict get $data content]
-            set id [dict get $data author id]
-            ::meta::log_chat $guildId [dict get $data id] $id $content \
-                [dict get $data embeds] [dict get $data attachments]
             
-            if {$id eq [dict get [set ${sessionNs}::self] id]} {
-                return
-            } else {
-                set userData [guild eval {
-                    SELECT data FROM users WHERE userId = :id
-                }]
-                if {
-                    $userData != "" 
-                    && ![catch {dict get $user bot} bot] 
-                    && $bot
-                } {return}
-                ::messageCreate $sessionNs $event $data
-            }
+            ::messageCreate $guildId $channelId $event $data
         }
         MESSAGE_UPDATE {
-            if {![dict exists $data type] || [dict get $data type] != 0} {
-                return
-            }
-            coroutine handleChanEvnt[::id] handleChanEvnt $sessionNs $data \
-                    "@msgedit"
+            coroutine ::meta::logEdit[::id] ::meta::logEdit $data
         }
         MESSAGE_DELETE {
-            dict set data author id ""
-            coroutine handleChanEvnt[::id] handleChanEvnt $sessionNs $data \
-                    "@delete"
+            coroutine ::meta::logDelete[::id] ::meta::logDelete $data
         }
         READY -
         RESUMED -
         MESSAGE_DELETE_BULK -
         TYPING_START -
-        USER_SETTINGS_UPDATE -
+        INVITE_CREATE -
+        INVITE_DELETE -
         USER_UPDATE {}
-        GUILD_MEMBER_UPDATE {
-            coroutine handleGuildEvnt[::id] handleGuildEvnt $sessionNs $data \
-                    "member"
-        }
+        GUILD_MEMBER_UPDATE -
+        GUILD_BAN_ADD {}
+        GUILD_BAN_REMOVE -
+        CHANNEL_UPDATE -
         PRESENCE_UPDATE {
-            coroutine handleGuildEvnt[::id] handleGuildEvnt $sessionNs $data \
-                    "presence"
+            coroutine handleGuildEvnt[::id] handleGuildEvnt $data \
+                $event
         }
         GUILD_UPDATE -
         GUILD_DELETE {
@@ -295,66 +346,41 @@ proc ::mainCallbackHandler {sessionNs event data} {
                     GUILD_MEMBER_ADD     {set action "join"}
                     GUILD_MEMBER_REMOVE  {set action "part"}
                 }
-                coroutine handleGuildEvnt[::id] handleGuildEvnt $sessionNs \
-                        $data $action
+                coroutine handleGuildEvnt[::id] handleGuildEvnt $data $action
             }
         }
-        GUILD_BAN_ADD {}
-        GUILD_BAN_REMOVE {
-            coroutine handleGuildEvnt[::id] handleGuildEvnt $sessionNs $data \
-                    banremove
+        default {
+            puts "mainCallbackHandler: Unknown event $event"
         }
-        default {}
     }
 }
 
 proc reboot {userId channelId} {
-    global modules
     if {$userId != $::ownerId} {return}
-    foreach {module namespace} $modules {
-        ${namespace}::pre_rehash
-        namespace delete $namespace
-        source [file join $::scriptDir $module]
+    foreach module [dict get $::settings modules] {
+        [dict get $module module_name]::pre_reboot
+        namespace delete [dict get $module module_name]
+        source [file join $::scriptDir [dict get $module path]]
     }
-    ::meta::putdc [dict create content "Reboot complete!"] 0 $channelId
+    ::meta::putGc [dict create content "Reboot complete!"] 0 $channelId
+}
+
+proc shutdown {userId channelId {delay 10}} {
+    if {$userId != $::ownerId} {return}
+    if {$delay == "now"} {
+        exit
+    } else {
+        ::meta::putGc [dict create content "Shutting down in $delay seconds"] \
+            0 $channelId
+        after [expr {$delay*1000}] {exit}
+    }
 }
 
 proc registerCallbacks {sessionNs} {
-    discord setCallback $sessionNs READY                   ::mainCallbackHandler
-    discord setCallback $sessionNs RESUMED                 ::mainCallbackHandler
-    discord setCallback $sessionNs CHANNEL_CREATE          ::mainCallbackHandler
-    discord setCallback $sessionNs CHANNEL_UPDATE          ::mainCallbackHandler
-    discord setCallback $sessionNs CHANNEL_DELETE          ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_CREATE            ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_UPDATE            ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_DELETE            ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_BAN_ADD           ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_BAN_REMOVE        ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_EMOJIS_UPDATE     ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_INTEGRATIONS_UPDATE \
-            ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_MEMBER_ADD        ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_MEMBER_REMOVE     ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_MEMBER_UPDATE     ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_MEMBERS_CHUNK     ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_ROLE_CREATE       ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_ROLE_UPDATE       ::mainCallbackHandler
-    discord setCallback $sessionNs GUILD_ROLE_DELETE       ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_CREATE          ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_UPDATE          ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_DELETE          ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_DELETE_BULK     ::mainCallbackHandler
-    discord setCallback $sessionNs PRESENCE_UPDATE         ::mainCallbackHandler
-    discord setCallback $sessionNs TYPING_START            ::mainCallbackHandler
-    discord setCallback $sessionNs USER_SETTINGS_UPDATE    ::mainCallbackHandler
-    discord setCallback $sessionNs USER_UPDATE             ::mainCallbackHandler
-    discord setCallback $sessionNs VOICE_STATE_UPDATE      ::mainCallbackHandler
-    discord setCallback $sessionNs VOICE_SERVER_UPDATE     ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_REACTION_ADD    ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_REACTION_REMOVE ::mainCallbackHandler
-    discord setCallback $sessionNs MESSAGE_ACK             ::mainCallbackHandler
-    discord setCallback $sessionNs CHANNEL_PINS_ACK        ::mainCallbackHandler
-    discord setCallback $sessionNs CHANNEL_PINS_UPDATE     ::mainCallbackHandler
+    foreach event [dict keys $::discord::gateway::EventCallbacks] {
+        discord setCallback $sessionNs $event ::mainCallbackHandler
+        set ::eventExecute($event) {}
+    }
 }
 
 # For console stdin eval
@@ -376,41 +402,22 @@ proc asyncGets {chan {callback ""}} {
     flush stdout
 }
 
-# Ad-hoc log file size limiting follows
-set debugFile "${scriptDir}/debug"
-set debugLog {}
-set maxSize [expr {4 * 1024**2}]
-
-if {[catch {open $debugFile "a"} debugLog]} {
-    puts stderr $debugLog
-} else {
-    ${discord::log}::logproc debug ::logDebug
-}
-
-# Set to 0 for a cleaner debug log.
-discord::gateway logWsMsg 1
-${discord::log}::setlevel debug
-
 puts -nonewline "% "
 flush stdout
 fconfigure stdin -blocking 0 -buffering line
 fileevent stdin readable [list asyncGets stdin]
 
-#trace add execution discord::gateway::Handler enter TraceExeTime::Enter
-#trace add execution discord::gateway::Handler leave TraceExeTime::Leave
-#trace add execution discord::ManageEvents enter TraceExeTime::Enter
-#trace add execution discord::ManageEvents leave TraceExeTime::Leave
-
 set startTime [clock seconds]
-
 set session [discord connect $token ::registerCallbacks]
 
 vwait forever
 
+################################################################################
+### Shutting down                                                            ###
+################################################################################
 if {[catch {discord disconnect $session} res]} {
     puts stderr $res
 }
 
 close $debugLog
 ${log}::delete
-infoDb close

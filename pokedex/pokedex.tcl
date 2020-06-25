@@ -2,7 +2,7 @@
 #
 #       This file implements the Tcl code for querying the Pokedex database
 #
-# Copyright (c) 2018, Jerry Yong
+# Copyright (c) 2018-2020, Jerry Yong
 #
 # See the file "LICENSE" for information on usage and redistribution of this
 # file.
@@ -54,16 +54,16 @@ proc pokedex::command {} {
     upvar data data text text channelId channelId guildId guildId userId userId
     switch [lindex $text 0] {
         "!pokedex" {
-            pokedex [regsub {!pokedex } $text ""]
+            pokedex [regsub {!pokedex } $text {}]
         }
         "!ability" {
-            ability [regsub {!ability } $text ""]
+            ability [regsub {!ability } $text {}]
         }
         "!move" {
-            move [regsub {!move } $text ""]
+            move [regsub {!move } $text {}]
         }
         "!item" {
-            item [regsub {!item } $text ""]
+            item [regsub {!item } $text {}]
         }
         default {
             return 0
@@ -93,12 +93,12 @@ proc pokedex::pokedex {args} {
             if {$userId != $::ownerId} {return}
             set arg [lindex $args 1]
             set result [query $arg]
-            ::meta::putdc [dict create content "```$result```"] 1
+            ::meta::putGc [dict create content "```$result```"] 1
             return
         }
         default {
             if {[llength $args] == 0} {
-                ::meta::putdc [dict create content $pokedex(usage)] 1
+                ::meta::putGc [dict create content $pokedex(usage)] 1
                 return
             }
             set result [get_pokemon normal [join $args { }]]
@@ -107,11 +107,11 @@ proc pokedex::pokedex {args} {
     set result [lindex [lassign $result mode] 0]
     switch $mode {
         0 {
-            ::meta::putdc $result 1
+            ::meta::putGc $result 1
         }
         1 {
             set result [dict set result content $pokedex(logo)]
-            ::meta::putdc $result 1
+            ::meta::putGc $result 1
         }
         2 {
             set prefix "$pokedex(logo) Results: "
@@ -125,7 +125,7 @@ proc pokedex::pokedex {args} {
                     set idx [expr {$i+39}]
                 }
                 set group [lrange $result $i $idx]
-                ::meta::putdc [dict create content \
+                ::meta::putGc [dict create content \
                     "$pokedex(logo) Results: [join $group {, }] $suffix"] 1
             }
         }
@@ -206,7 +206,7 @@ proc pokedex::search {arg} {
     
     set result ""
     dex eval "SELECT * FROM $table" ar {
-        if {[regexp -nocase -- $arg [join [lmap x $fields {set ar($x)}] " "]]} {
+        if {[regexp -nocase $arg [join [lmap x $fields {set ar($x)}] { }]]} {
             lappend results $ar(formname)
             set mode 2
         }
@@ -232,7 +232,7 @@ proc pokedex::random {number args} {
         switch -nocase -glob $flag {
             -region {
                 set conds [list]
-                set regions [regexp -all -inline -nocase -- {[a-z]+} $param]
+                set regions [regexp -all -inline -nocase {[a-z]+} $param]
                 foreach reg $regions {
                     switch -nocase -glob $reg {
                         kan* {lappend conds "(id >= '#001' AND id < '#152')"}
@@ -292,7 +292,7 @@ proc pokedex::random {number args} {
 proc pokedex::query {query} {
     variable pokedex
     set re {\y(?:ALTER|UPDATE|INTO|CREATE|INSERT)\y}
-    if {[regexp -all -nocase -- $re $query]} {
+    if {[regexp -all -nocase $re $query]} {
         return [list 0 \
             [dict create content "Data manipulation queries are not supported."]]
     }
@@ -340,10 +340,10 @@ proc pokedex::ability {arg} {
     switch [lindex $args 0] {
             search {
             set arg [lindex $args 1]
-            ::meta::putdc [search_ability $arg] 1
+            ::meta::putGc [search_ability $arg] 1
         }
         default {
-            ::meta::putdc [get_ability $arg] 1
+            ::meta::putGc [get_ability $arg] 1
         }
     }
 }
@@ -385,8 +385,8 @@ proc pokedex::search_ability {arg} {
         JOIN abilities B ON A.id = B.id
     " arr {
         if {
-            [regexp -nocase -- $arg \
-                [join [list $arr(id) $arr(english) $arr(description)] " "]]
+            [regexp -nocase $arg \
+                [join [list $arr(id) $arr(english) $arr(description)] { }]]
         } {
             lappend results $arr(english)
         }
@@ -407,12 +407,12 @@ proc pokedex::move {arg} {
     switch [lindex $args 0] {
         search {
             set arg [lindex $args 1]
-            ::meta::putdc [search_move $arg]
+            ::meta::putGc [search_move $arg]
         } next {
             set arg [lindex $args 1]
-            ::meta::putdc [flags_move $arg]
+            ::meta::putGc [flags_move $arg]
         } default {
-            ::meta::putdc [get_move $arg]
+            ::meta::putGc [get_move $arg]
         }
     }
 }
@@ -455,8 +455,8 @@ proc pokedex::search_move {arg} {
         JOIN moves B ON A.id = B.id
     " arr {
         if {
-            [regexp -nocase -- $arg \
-                [join [list $arr(id) $arr(english) $arr(description)] " "]]
+            [regexp -nocase $arg \
+                [join [list $arr(id) $arr(english) $arr(description)] { }]]
         } {
             lappend results $arr(english)
         }
@@ -503,22 +503,22 @@ proc pokedex::flags_move {arg} {
 # Itemdex 
 ##
 proc pokedex::item {arg} {
-    ::meta::putdc [dict create content \
+    ::meta::putGc [dict create content \
         "Unfortunately, this function is not available yet."] 0
     return
     set args [split $arg]
     switch [lindex $args 0] {
             search {
             set arg [lindex $args 1]
-            ::meta::putdc [search_item $arg] 1
+            ::meta::putGc [search_item $arg] 1
         }
         default {
-            ::meta::putdc [get_item $arg] 1
+            ::meta::putGc [get_item $arg] 1
         }
     }
 }
 
-proc pokedex::pre_rehash {} {
+proc pokedex::pre_reboot {} {
     return
 }
 
