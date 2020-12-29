@@ -1,4 +1,4 @@
-# General guide
+# General command guide
 
 The general syntax for any command is as follows:
 
@@ -46,6 +46,13 @@ Bans a user from the bot's commands. **This does not ban the user from the serve
 **!unban _user_**
 
 Unbans a user from the bot's commands. **This does not ban the user from the server, you should do that through discord itself**. Only users with the Admin, Manage Guild and Manage Channels permissions can use this command. _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+
+**!baninfo ?_user_? ?_scope_? ?_view_?**
+
+Retrieves ban information from the bot.
+  - _user_ can be the actual user ID on discord, the username of the user or the user's tag (e.g. @Username).
+  - _scope_ defaults to _user_ and will display the specified user's ban information (the ban expiry date, the user who issued the ban, the reason, etc. The scope can also be _guild_, _server_ or _bot_. The former two are synonymous and will display a list of all the users in the current guild/server with information on each. _bot_ scope will list all users banned at bot level (a banned user does not have access to the bot's commands regardless of the guild/server they are in). Only a bot admin can use this scope.
+  - _view_ is only useful when the scope is specified to be _guild_, _server_ or _bot_ and has the following syntax: `columnName:filter,order|columnName:filter,order|...|size:columnSize` where _field_ is the field name, _filter_ is optional and will show rows with only the specified value, _order_ is optional and will sort the rows according to this column data either in ascending or descending by specifying _asc_ or _desc_ respectively, and finally _columnSize_ is optional (defaults to 70 characters, the minimum, but can be any integer larger than 70) and indicates the maximum total length of a row in characters. It causes word wrapping in the ban reason column if the text would otherwise cause the row length to exceed this limit. If not specified, all the columns are displayed with no sorting. The minimum size of a column containing long text however is 20 characters.
 
 **!delete _messageId_**
 
